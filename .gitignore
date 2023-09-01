@@ -1,0 +1,8 @@
+# Cargo
+/target
+
+# pre-commit
+.pre-commit-config.yaml
+
+# direnv
+.envrc
