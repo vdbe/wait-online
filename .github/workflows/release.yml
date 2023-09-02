@@ -1,0 +1,79 @@
+permissions:
+  contents: write
+  actions: read
+  checks: read
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+name: Release
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v6
+        id: checks-status
+        with:
+          script: |
+            const passConclusions = ["success", "neutral", "skipped", null];
+            const noPassConclusions = ["neutral", "cancelled", "timed_out", null];
+            async function getWorkflowRun(owner, repo, run_id) {
+                const response = await github.rest.actions.getWorkflowRun({
+                    owner,
+                    repo,
+                    run_id,
+                });
+                return response.data;
+            }
+            async function areAllChecksPassed(owner, repo, ref, checksToExclude = []) {
+                const currentWorkflowRun = await getWorkflowRun(context.repo.owner, context.repo.repo, context.runId);
+                const currentCheckSuiteId = currentWorkflowRun.check_suite_id;
+                const response = await github.rest.checks.listForRef({
+                    owner,
+                    repo,
+                    ref,
+                });
+                const checks = response.data.check_runs;
+                const filteredChecks = checks.filter((check) => (check.check_suite.id !== currentCheckSuiteId
+                    && !checksToExclude.includes(check.name)));
+                const allChecksCompleted = filteredChecks.every((check) => (check.status === 'completed'));
+                const allDonechecksPassed = filteredChecks.every((check) => passConclusions.includes(check.conclusion));
+
+                return {
+                    allChecksCompleted,
+                    allDonechecksPassed,
+                };
+            }
+            areAllChecksPassed(context.repo.owner, context.repo.repo, context.sha)
+                .then((res) => {
+                console.log(res);
+                core.setOutput('allChecksCompleted', res.allChecksCompleted);
+                core.setOutput('allDonechecksPassed', res.allDonechecksPassed);
+                return res;
+            })
+                .catch((error) => {
+                console.error('Error:', error);
+                process.exitCode = 1;
+            });
+      - name: Check statuses
+        if: steps.checks-status.outputs.allChecksCompleted == false || steps.checks-status.outputs.allDonechecksPassed == false
+        run: |
+          # This step will run if any of the conditions is false
+          echo "Some checks are still running or did not pass"
+          exit 1
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Install stable
+        uses: dtolnay/rust-toolchain@stable
+      - name: cargo build
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: cargo build --release
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            target/release/wait-online
+
+
