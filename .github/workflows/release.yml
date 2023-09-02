@@ -7,7 +7,7 @@ on:
     tags:
       - "v*.*.*"
   workflow_dispatch:
-name: Release
+name: release
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -66,14 +66,12 @@ jobs:
         uses: actions/checkout@v3
       - name: Install stable
         uses: dtolnay/rust-toolchain@stable
-      - name: cargo build
+      - name: make
         env:
           RUSTFLAGS: -C target-feature=+crt-static
-        run: cargo build --release
+        run: make
       - name: Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             target/release/wait-online
-
-
