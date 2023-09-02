@@ -21,14 +21,23 @@ pub fn all_interfaces_up() -> Result<bool, io::Error> {
 
 /// Checks if an interface is up
 ///
-/// An interface is up when the flags
-/// [`InterfaceFlags::IFF_LOOPBACK`] _or_ [`InterfaceFlags::IFF_UP`] are set.
+/// An interface is up when the flags [`InterfaceFlags::IFF_LOOPBACK`] _or_
+/// [`InterfaceFlags::IFF_LOWER_UP`] are set.
 ///
-/// `IFF_LOOPBACK` is seen as up because the `operstate` of an loopback interface
-/// is always unkown.
+/// `IFF_LOOPBACK` is seen as up because the `operstate` of an loopback
+/// interface is always unkown.
+///
+/// `IFF_LOWER_UP` is used instead o `IFF_LOWER_UP` to match `ip addresses`
+/// _oper states_ (see table below).
+///
+/// | `IFF_FLAG`       | oper state     |
+/// | -------------- | -------------- |
+/// | `IFF_UP`       | LOWERLAYERDOWN |
+/// | `IFF_LOWER_UP` | UP             |
 #[must_use]
 pub const fn is_interface_up(ifaddr: libc::ifaddrs) -> bool {
-    let mask = (InterfaceFlags::IFF_LOOPBACK | InterfaceFlags::IFF_UP) as u32;
+    let mask =
+        (InterfaceFlags::IFF_LOOPBACK | InterfaceFlags::IFF_LOWER_UP) as u32;
 
     (ifaddr.ifa_flags & mask) != 0
 }
@@ -57,7 +66,7 @@ pub fn getifaddrs() -> Result<InterfaceAddressIterator, io::Error> {
 pub struct InterfaceAddressIterator {
     /// Head linked list returned by `ifaddrs`
     ///
-    /// Needed for [`libc::freeifaddrs()`].
+    /// needed for [`libc::freeifaddrs()`].
     base: *mut libc::ifaddrs,
     next: *mut libc::ifaddrs,
 }
