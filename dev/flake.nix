@@ -33,6 +33,7 @@
             # Tools
             bacon
             cargo-expand
+            cargo-hack
             cargo-msrv
             cargo-show-asm
 

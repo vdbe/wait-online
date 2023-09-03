@@ -2,6 +2,7 @@
 name = "wait-online"
 version = "0.1.1"
 edition = "2021"
+default-run = "wait-online"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -9,4 +10,6 @@ edition = "2021"
 strip = true
 
 [dependencies]
+clap = { version = "4.4.2", features = ["derive"] }
+ctrlc = "3.4.1"
 libc = "0.2.31"
