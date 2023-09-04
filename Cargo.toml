@@ -11,5 +11,4 @@ strip = true
 
 [dependencies]
 clap = { version = "4.4.2", features = ["derive"] }
-ctrlc = "3.4.1"
 libc = "0.2.31"
