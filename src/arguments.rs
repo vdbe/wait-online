@@ -1,11 +1,8 @@
 #[cfg(feature = "clap")]
 use clap::{value_parser, Parser};
 
-#[derive(Debug, )]
-#[cfg_attr(feature = "clap",
-    derive(Parser),
-    command(author, version, about),
-)]
+#[derive(Debug)]
+#[cfg_attr(feature = "clap", derive(Parser), command(author, version, about))]
 pub struct Args {
     /// Interface(s) to wait for
     #[cfg_attr(feature = "clap", arg(short, long, conflicts_with = "ignore"))]
@@ -18,10 +15,16 @@ pub struct Args {
     #[cfg_attr(feature = "clap", arg( long, default_value_t = Self::DEFAULT_TIMOUT))]
     pub timeout: u64,
 
-    #[cfg_attr(feature = "clap", arg(short = '4', long, default_value_t = false))]
+    #[cfg_attr(
+        feature = "clap",
+        arg(short = '4', long, default_value_t = false)
+    )]
     pub ipv4: bool,
 
-    #[cfg_attr(feature = "clap", arg(short = '6', long, default_value_t = false))]
+    #[cfg_attr(
+        feature = "clap",
+        arg(short = '6', long, default_value_t = false)
+    )]
     pub ipv6: bool,
 
     #[cfg_attr(feature = "clap", arg(long, default_value_t = false))]
