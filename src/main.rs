@@ -6,8 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 use wait_online::{
-    arguments::Args, ifaddrs::getifaddrs, network_online,
-    NewtorkOnlineArguments,
+    arguments::Args, ifaddrs::getifaddrs, network_online, NetworkArgument,
 };
 
 fn main() -> Result<ExitCode, io::Error> {
@@ -16,14 +15,14 @@ fn main() -> Result<ExitCode, io::Error> {
     let args = Args::get();
     let stop = start + Duration::from_secs(args.timeout);
 
-    let network_online_arguments = NewtorkOnlineArguments::from(&args);
+    let network_argument = NetworkArgument::from(&args);
 
     if args.interval == 0 {
-        while !network_online(network_online_arguments, getifaddrs()?) {
+        while !network_online(getifaddrs()?, network_argument) {
             sleep(Duration::from_millis(args.interval));
         }
     } else {
-        while !network_online(network_online_arguments, getifaddrs()?) {
+        while !network_online(getifaddrs()?, network_argument) {
             // Check if for timeout
             // If not sleep for interval or untill timeout whichever is faster
             let time_to_timeout = stop.checked_duration_since(Instant::now());

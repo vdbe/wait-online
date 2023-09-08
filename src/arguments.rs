@@ -14,6 +14,15 @@ pub struct Args {
     #[arg( long, default_value_t = Self::DEFAULT_TIMOUT)]
     pub timeout: u64,
 
+    #[arg(short = '4', long, default_value_t = false)]
+    pub ipv4: bool,
+
+    #[arg(short = '6', long, default_value_t = false)]
+    pub ipv6: bool,
+
+    #[arg(long, default_value_t = false)]
+    pub any: bool,
+
     /// Time between checks in ms
     #[arg(
         long, default_value_t = Self::DEFAULT_INTERVAL,
@@ -42,6 +51,9 @@ impl Default for Args {
             ignore: None,
             timeout: Self::DEFAULT_TIMOUT,
             interval: Self::DEFAULT_INTERVAL,
+            ipv4: false,
+            ipv6: false,
+            any: false,
         }
     }
 }

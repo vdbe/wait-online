@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 # Spend CI time only on latest ref: https://github.com/jonhoo/rust-ci-conf/pull/5
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
@@ -65,7 +66,7 @@ jobs:
     # https://docs.github.com/en/actions/learn-github-actions/contexts#context-availability
     strategy:
       matrix:
-        msrv: ["1.59.0"] # `strip` feature requires 1.59.0
+        msrv: ["1.70.0"] # `anstream v0.5.0` requires 1.70.0
     name: ubuntu / ${{ matrix.msrv }}
     steps:
       - uses: actions/checkout@v3

@@ -1,97 +1,302 @@
 #[cfg(not(target_os = "linux"))]
 compile_error!("only linux is supported");
 
+use std::{collections::HashMap, ffi};
+
+// Re-exported external crates
+pub use nix::libc;
+
 use arguments::Args;
-use ifaddrs::is_interface_up;
-use std::ffi;
+use ifaddrs::{
+    check_require_or_ignore, is_interface_up, InterfacesActionArgument,
+    InterfacesRequireOrIgnoreArgument,
+};
+use nix::net::if_::InterfaceFlags;
+use sockaddr::{
+    check_family_type, get_addres_family, AddressFamily,
+    InterfacesFamilyTypeArgument,
+};
 
 mod errno;
-#[macro_use]
-mod macros;
-mod bitflags;
 
 pub mod arguments;
 pub mod ifaddrs;
+pub mod operstate;
+pub mod sockaddr;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum NetworkOnlineArgumentsInterfacesAction {
-    Ignore,
-    Require,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct NetworkOnlineArgumentsInterfaces<'a> {
-    interfaces: &'a [String],
-    action: NetworkOnlineArgumentsInterfacesAction,
+#[derive(Debug, Clone, Copy, Default)]
+pub struct InterfacesArgument<'a> {
+    require_or_ignore: Option<InterfacesRequireOrIgnoreArgument<'a>>,
+    family_type: Option<InterfacesFamilyTypeArgument>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct NewtorkOnlineArguments<'a> {
-    interfaces: Option<NetworkOnlineArgumentsInterfaces<'a>>,
+pub struct NetworkArgument<'a> {
+    interfaces_argument: Option<InterfacesArgument<'a>>,
+    exact: bool,
+    any: bool,
+}
+type InterfaceMap<'a> = HashMap<&'a [u8], Option<(bool, bool)>>;
+
+fn is_interface_online_lazy(
+    ifaddr: ifaddrs::ifaddrs,
+    interfaces_argument: InterfacesArgument,
+) -> bool {
+    #[allow(clippy::cast_sign_loss)]
+    let mask = (InterfaceFlags::IFF_LOOPBACK.bits()
+        | InterfaceFlags::IFF_LOWER_UP.bits()) as u32;
+
+    ifaddr.ifa_flags & mask != 0
+        || interfaces_argument
+            .family_type
+            .map_or(false, |family_arg|
+                // SAFETY: We know `ifa_addr` is a valid or null ptr from `ifaddr`
+                unsafe {
+                    !check_family_type(ifaddr.ifa_addr, family_arg)
+                }
+            )
+        || interfaces_argument
+            .require_or_ignore
+            .map_or(false, |require_or_ignore_arg|
+                // SAFETY: We know `ifa_name` if a valid ptr from `ifaddr`
+                unsafe {
+                        !check_require_or_ignore(ifaddr.ifa_name, require_or_ignore_arg)
+                },
+            )
+}
+
+fn is_interface_online_exact(
+    ifaddr: libc::ifaddrs,
+    interface_argument: InterfacesArgument<'_>,
+    map: Option<&mut InterfaceMap>,
+) -> Option<bool> {
+    #[allow(clippy::cast_sign_loss)]
+    let mask = (InterfaceFlags::IFF_LOOPBACK.bits()
+        | InterfaceFlags::IFF_LOWER_UP.bits()) as u32;
+
+    let ifa_name = unsafe { ffi::CStr::from_ptr(ifaddr.ifa_name) };
+    let ifa_addr_family = unsafe { get_addres_family(ifaddr.ifa_addr) };
+
+    let interface_up = ifaddr.ifa_flags & mask != 0;
+    let correct_family: Option<AddressFamily> = interface_argument
+        .family_type
+        .map_or(ifa_addr_family, |family_arg| match ifa_addr_family {
+            Some(AddressFamily::Inet) if family_arg.ipv4 => {
+                Some(AddressFamily::Inet)
+            }
+            Some(AddressFamily::Inet6) if family_arg.ipv6 => {
+                Some(AddressFamily::Inet6)
+            }
+            _ => None,
+        });
+    let (correct_name, insert): (bool, bool) = interface_argument
+        .require_or_ignore
+        .map_or((true, true), |require_or_ignore_arg| {
+            let in_interface = require_or_ignore_arg
+                .interfaces
+                .iter()
+                .any(|interface| interface.as_bytes() == ifa_name.to_bytes());
+
+            let a = require_or_ignore_arg.action
+                == InterfacesActionArgument::Ignore;
+
+            (a ^ in_interface, a)
+        });
+
+    // Insert interface into the hash map if needed
+    if correct_name {
+        if let Some(map) = map {
+            let current = match ifa_addr_family {
+                Some(AddressFamily::Inet) => (true, false),
+                Some(AddressFamily::Inet6) => (false, true),
+                _ => (false, false),
+            };
+
+            #[allow(clippy::cast_sign_loss, clippy::option_if_let_else)]
+            if let Some(value) = map.get_mut(ifa_name.to_bytes()) {
+                if let Some(prev) = value {
+                    prev.0 |= current.0;
+                    prev.1 |= current.1;
+                } else {
+                    *value = Some(current);
+                }
+            } else if insert
+                && (ifaddr.ifa_flags
+                    & InterfaceFlags::IFF_LOOPBACK.bits() as u32)
+                    == 0
+            {
+                // Insert newly found interface into map
+                // except for when the required flag is used
+                // or it's a loopback interface
+                _ = map.insert(ifa_name.to_bytes(), Some(current));
+            }
+        }
+    };
+
+    match (correct_family.is_some(), correct_name) {
+        (true, true) => Some(interface_up),
+        _ => None,
+    }
 }
 
 /// Checks if network if online given the requirements provided by
 /// `network_online_arguments`
 pub fn network_online<I>(
-    network_online_arguments: NewtorkOnlineArguments,
     mut ifaddrs: I,
+    network_argument: NetworkArgument,
 ) -> bool
 where
-    I: Iterator<Item = libc::ifaddrs>,
+    I: Iterator<Item = ifaddrs::ifaddrs>,
 {
-    if let Some(NetworkOnlineArgumentsInterfaces { interfaces, action }) =
-        network_online_arguments.interfaces
-    {
-        ifaddrs.all(|ifaddr| {
-            // up   => true
-            // down => _not_ in interfaces => require => true
-            //                             => ignore  => false
-            //         _in_ interfaces     => require => false
-            //                             => ignore  => true
-            //
-            is_interface_up(ifaddr) || {
-                let ifa_name = unsafe { ffi::CStr::from_ptr(ifaddr.ifa_name) };
-                let ifa_name = ifa_name.to_bytes();
-                let in_interface = interfaces
-                    .iter()
-                    .any(|interface| interface.as_bytes() == ifa_name);
-                (action == NetworkOnlineArgumentsInterfacesAction::Require)
-                    ^ in_interface
-            }
+    match (
+        network_argument.exact,
+        network_argument.any,
+        network_argument.interfaces_argument,
+    ) {
+        (_, false, None) => ifaddrs.all(is_interface_up),
+        (_, true, None) => ifaddrs.any(is_interface_up),
+        (true, any, Some(interface_argument)) => {
+            network_online_exact(ifaddrs, any, interface_argument)
+        }
+        (false, any, Some(interface_argument)) => {
+            network_online_lazy(ifaddrs, any, interface_argument)
+        }
+    }
+}
+
+fn network_online_exact<I>(
+    mut ifaddrs: I,
+    any: bool,
+    interface_argument: InterfacesArgument<'_>,
+) -> bool
+where
+    I: Iterator<Item = ifaddrs::ifaddrs>,
+{
+    if any {
+        return ifaddrs.any(|ifaddr| {
+            is_interface_online_exact(ifaddr, interface_argument, None)
+                .unwrap_or(false)
+        });
+    }
+
+    let mut map: InterfaceMap=
+        // Prepopulate Hashmap with required interfaces
+        if let InterfacesArgument {
+            require_or_ignore:
+                Some(InterfacesRequireOrIgnoreArgument {
+                    interfaces,
+                    action: InterfacesActionArgument::Require,
+                }),
+            ..
+        } = interface_argument
+        {
+            interfaces.iter().map(|name| (name.as_bytes(), None)).collect()
+        } else {
+            HashMap::default()
+        };
+
+    let all_up = ifaddrs
+        .filter_map(|ifaddr| {
+            is_interface_online_exact(
+                ifaddr,
+                interface_argument,
+                Some(&mut map),
+            )
         })
+        .all(|x| x);
+
+    let all_present = map.values().all(|value| {
+        if let Some((has_ipv4, has_ipv6)) = value {
+            if let InterfacesArgument {
+                family_type:
+                    Some(InterfacesFamilyTypeArgument {
+                        ipv4: require_ipv4,
+                        ipv6: require_ipv6,
+                    }),
+                ..
+            } = interface_argument
+            {
+                return *has_ipv4 && *has_ipv6
+                    || ((require_ipv4 ^ require_ipv6)
+                        && (require_ipv4 && *has_ipv4
+                            || require_ipv6 && *has_ipv6));
+            }
+            return *has_ipv4 || *has_ipv6;
+        }
+
+        false
+    });
+    all_up && all_present
+}
+
+fn network_online_lazy<I>(
+    mut ifaddrs: I,
+    any: bool,
+    interface_argument: InterfacesArgument<'_>,
+) -> bool
+where
+    I: Iterator<Item = ifaddrs::ifaddrs>,
+{
+    if any {
+        ifaddrs
+            .any(|ifaddr| is_interface_online_lazy(ifaddr, interface_argument))
     } else {
-        ifaddrs.all(is_interface_up)
+        ifaddrs
+            .all(|ifaddr| is_interface_online_lazy(ifaddr, interface_argument))
     }
 }
 
-impl<'a> NetworkOnlineArgumentsInterfaces<'a> {
-    const fn new(
-        interfaces: &'a [String],
-        action: NetworkOnlineArgumentsInterfacesAction,
-    ) -> Self {
-        Self { interfaces, action }
-    }
-}
+impl<'a> InterfacesArgument<'a> {
+    fn from_args(args: &'a Args) -> (bool, Option<Self>) {
+        let require_or_ignore = InterfacesRequireOrIgnoreArgument::parse_args(
+            args.interface.as_deref(),
+            args.ignore.as_deref(),
+        );
+        let family_type =
+            InterfacesFamilyTypeArgument::from_args(args.ipv4, args.ipv6);
 
-impl<'a> From<&'a Args> for NewtorkOnlineArguments<'a> {
-    fn from(args: &'a Args) -> Self {
-        type Noia<'a> = NetworkOnlineArgumentsInterfaces<'a>;
-        use NetworkOnlineArgumentsInterfacesAction::{Ignore, Require};
-        let interfaces: Option<NetworkOnlineArgumentsInterfaces<'a>> =
-            match (&args.interface, &args.ignore) {
-                (None, None) => None,
-                (Some(interfaces), None) => {
-                    Some(Noia::new(interfaces, Require))
-                }
-                (None, Some(interfaces)) => Some(Noia::new(interfaces, Ignore)),
-                _ => unreachable!(
-                "`interfaces` and `ignore` can never be set at the same time"
+        match (require_or_ignore, family_type) {
+            (None, None) => (false, None),
+            (require_or_ignore, Some(family_type)) => (
+                true,
+                Some(InterfacesArgument {
+                    require_or_ignore: require_or_ignore.map(
+                        |(interfaces, action)| {
+                            InterfacesRequireOrIgnoreArgument::new(
+                                interfaces, action,
+                            )
+                        },
+                    ),
+                    family_type: Some(family_type),
+                }),
             ),
-            };
-        Self { interfaces }
+            (Some((interfaces, action)), None) => (
+                action == InterfacesActionArgument::Require,
+                Some(InterfacesArgument {
+                    require_or_ignore: Some(
+                        InterfacesRequireOrIgnoreArgument::new(
+                            interfaces, action,
+                        ),
+                    ),
+                    family_type,
+                }),
+            ),
+        }
     }
 }
 
+impl<'a> From<&'a Args> for NetworkArgument<'a> {
+    fn from(args: &'a Args) -> Self {
+        let (exact, interfaces_argument) = InterfacesArgument::from_args(args);
+        Self {
+            interfaces_argument,
+            exact,
+            any: args.any,
+        }
+    }
+}
+
+#[allow(clippy::field_reassign_with_default)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -99,45 +304,175 @@ mod tests {
     use core::slice;
     use std::{ffi::CString, ptr};
 
-    use libc::{c_char, c_void, ifaddrs, sa_family_t, sockaddr};
+    use libc::{c_char, sa_family_t};
+    use nix::sys::socket::AddressFamily;
 
-    use crate::ifaddrs::InterfaceFlags as F;
+    use crate::{
+        ifaddrs::{ifaddrs, InterfaceFlags as F},
+        sockaddr::sockaddr,
+    };
 
-    const FLAGS_LOOPBACK: i32 =
-        F::IFF_UP | F::IFF_LOOPBACK | F::IFF_RUNNING | F::IFF_LOWER_UP;
+    const FLAGS_LOOPBACK: i32 = F::IFF_UP.bits()
+        | F::IFF_LOOPBACK.bits()
+        | F::IFF_RUNNING.bits()
+        | F::IFF_LOWER_UP.bits();
 
     const FLAGS_LOWER_LAYWER_DOWN: i32 =
-        F::IFF_UP | F::IFF_BROADCAST | F::IFF_MULTICAST;
+        F::IFF_UP.bits() | F::IFF_BROADCAST.bits() | F::IFF_MULTICAST.bits();
 
-    const FLAGS_UP: i32 = F::IFF_UP
-        | F::IFF_BROADCAST
-        | F::IFF_RUNNING
-        | F::IFF_MULTICAST
-        | F::IFF_LOWER_UP;
+    const FLAGS_UP: i32 = F::IFF_UP.bits()
+        | F::IFF_BROADCAST.bits()
+        | F::IFF_RUNNING.bits()
+        | F::IFF_MULTICAST.bits()
+        | F::IFF_LOWER_UP.bits();
 
     #[test]
     fn online() {
-        let online_args = NewtorkOnlineArguments::default();
+        let n_args = NetworkArgument::default();
 
         let mut v = vec![
-            MockIfaddrs::new().flags(FLAGS_LOOPBACK),
-            MockIfaddrs::new().flags(FLAGS_UP),
+            MockIfaddrs::new().name("lo").flags(FLAGS_LOOPBACK),
+            MockIfaddrs::new().name("eth0").flags(FLAGS_UP),
         ];
-        assert!(network_online(online_args, MockIfaddrsIterator::new(&v)));
+        assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
 
-        v.push(MockIfaddrs::new().flags(FLAGS_LOWER_LAYWER_DOWN));
-        assert!(!network_online(online_args, MockIfaddrsIterator::new(&v)));
+        v.push(
+            MockIfaddrs::new()
+                .name("eth1")
+                .flags(FLAGS_LOWER_LAYWER_DOWN),
+        );
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        v.pop();
+        v.push(
+            MockIfaddrs::new()
+                .name("eth2")
+                .flags(FLAGS_UP)
+                .sockaddr(AddressFamily::Packet),
+        );
+        assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
+    }
+
+    #[test]
+    fn implicit_ignore_loopback() {
+        let mut args = Args::default();
+        args.ipv4 = true;
+        let n_args = NetworkArgument::from(&args);
+
+        let v = vec![
+            MockIfaddrs::new().name("lo").flags(FLAGS_LOOPBACK),
+            MockIfaddrs::new()
+                .name("eth0")
+                .flags(FLAGS_UP)
+                .sockaddr(AddressFamily::Inet),
+        ];
+        assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
+    }
+
+    #[test]
+    fn require_loopback() {
+        let mut args = Args::default();
+        args.ipv4 = true;
+        args.interface = Some(vec!["lo".into()]);
+        let n_args = NetworkArgument::from(&args);
+
+        let mock_ifaddr = MockIfaddrs::new()
+            .name("lo")
+            .flags(FLAGS_LOOPBACK)
+            .sockaddr(AddressFamily::Packet);
+
+        let mut v = vec![mock_ifaddr.sockaddr(AddressFamily::Packet)];
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        let mock_ifaddr = MockIfaddrs::new()
+            .name("lo")
+            .flags(FLAGS_LOOPBACK)
+            .sockaddr(AddressFamily::Packet);
+        v.push(mock_ifaddr.sockaddr(AddressFamily::Inet));
+        assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
+    }
+
+    #[test]
+    fn online_family_type_v4() {
+        let mut args = Args::default();
+        args.ipv4 = true;
+        let n_args = NetworkArgument::from(&args);
+
+        let mut v = vec![MockIfaddrs::new()
+            .name("eth0")
+            .flags(FLAGS_UP)
+            .sockaddr(AddressFamily::Inet)];
+        assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        v.push(
+            MockIfaddrs::new()
+                .name("eth1")
+                .flags(FLAGS_LOWER_LAYWER_DOWN)
+                .sockaddr(AddressFamily::Inet),
+        );
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        v.pop();
+        v.push(
+            MockIfaddrs::new()
+                .name("eth2")
+                .flags(FLAGS_LOWER_LAYWER_DOWN)
+                .sockaddr(AddressFamily::Inet6),
+        );
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        v.push(
+            MockIfaddrs::new()
+                .name("eth2")
+                .flags(FLAGS_UP)
+                .sockaddr(AddressFamily::Inet),
+        );
+        assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
+    }
+
+    #[test]
+    fn online_family_type_v6() {
+        let mut args = Args::default();
+        args.ipv6 = true;
+        let n_args = NetworkArgument::from(&args);
+
+        let mut v = vec![MockIfaddrs::new()
+            .name("eth0")
+            .flags(FLAGS_UP)
+            .sockaddr(AddressFamily::Inet6)];
+        assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        v.push(
+            MockIfaddrs::new()
+                .name("eth1")
+                .flags(FLAGS_LOWER_LAYWER_DOWN)
+                .sockaddr(AddressFamily::Inet6),
+        );
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        v.pop();
+        v.push(
+            MockIfaddrs::new()
+                .name("eth2")
+                .flags(FLAGS_LOWER_LAYWER_DOWN)
+                .sockaddr(AddressFamily::Inet),
+        );
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        v.push(
+            MockIfaddrs::new()
+                .name("eth2")
+                .flags(FLAGS_UP)
+                .sockaddr(AddressFamily::Inet6),
+        );
+        assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
     }
 
     #[test]
     fn online_require_single() {
-        let interfaces = ["eth1".to_string()];
-        let online_args = NewtorkOnlineArguments {
-            interfaces: Some(NetworkOnlineArgumentsInterfaces {
-                interfaces: &interfaces,
-                action: NetworkOnlineArgumentsInterfacesAction::Require,
-            }),
-        };
+        let mut args = Args::default();
+        args.interface = Some(vec!["eth1".into()]);
+        let n_args = NetworkArgument::from(&args);
 
         let mut v = vec![
             MockIfaddrs::new().name("lo").flags(FLAGS_LOOPBACK),
@@ -147,140 +482,219 @@ mod tests {
                 .flags(FLAGS_LOWER_LAYWER_DOWN),
         ];
 
-        let i = MockIfaddrsIterator::new(&v);
-        assert!(!network_online(online_args, i));
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
 
+        v.pop();
         v.push(MockIfaddrs::new().name("eth1").flags(FLAGS_UP));
-        assert!(!network_online(online_args, MockIfaddrsIterator::new(&v)));
-
-        v.remove(2);
-        assert!(network_online(online_args, MockIfaddrsIterator::new(&v)));
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
     }
+
+    #[test]
+    fn online_require_missing() {
+        let mut args = Args::default();
+        args.interface = Some(vec!["eth999999".into()]);
+        let n_args = NetworkArgument::from(&args);
+
+        let v = vec![
+            MockIfaddrs::new().name("lo").flags(FLAGS_LOOPBACK),
+            MockIfaddrs::new().name("eth0").flags(FLAGS_UP),
+        ];
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
+    }
+
     #[test]
     fn online_require_multi() {
-        let interfaces = ["eth1".to_string(), "eth2".to_string()];
-        let online_args = NewtorkOnlineArguments {
-            interfaces: Some(NetworkOnlineArgumentsInterfaces {
-                interfaces: &interfaces,
-                action: NetworkOnlineArgumentsInterfacesAction::Require,
-            }),
-        };
+        let mut args = Args::default();
+        args.interface = Some(vec!["eth1".into(), "eth2".into()]);
+        let n_args = NetworkArgument::from(&args);
 
         let mut v = vec![
-            MockIfaddrs::new().name("lo").flags(FLAGS_LOOPBACK),
-            MockIfaddrs::new().name("eth0").flags(FLAGS_UP),
+            MockIfaddrs::new()
+                .name("eth0")
+                .flags(FLAGS_UP)
+                .sockaddr(AddressFamily::Inet),
             MockIfaddrs::new()
                 .name("eth1")
-                .flags(FLAGS_LOWER_LAYWER_DOWN),
+                .flags(FLAGS_LOWER_LAYWER_DOWN)
+                .sockaddr(AddressFamily::Inet),
             MockIfaddrs::new()
                 .name("eth2")
-                .flags(FLAGS_LOWER_LAYWER_DOWN),
+                .flags(FLAGS_LOWER_LAYWER_DOWN)
+                .sockaddr(AddressFamily::Inet),
         ];
 
-        assert!(!network_online(online_args, MockIfaddrsIterator::new(&v)));
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        v[0] = MockIfaddrs::new()
+            .name("eth0")
+            .flags(FLAGS_LOWER_LAYWER_DOWN)
+            .sockaddr(AddressFamily::Inet);
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
 
         v[1] = MockIfaddrs::new()
-            .name("eth0")
-            .flags(FLAGS_LOWER_LAYWER_DOWN);
-        assert!(!network_online(online_args, MockIfaddrsIterator::new(&v)));
-
-        v[2] = MockIfaddrs::new().name("eth1").flags(FLAGS_UP);
-        assert!(!network_online(online_args, MockIfaddrsIterator::new(&v)));
-
-        v[2] = MockIfaddrs::new()
             .name("eth1")
-            .flags(FLAGS_LOWER_LAYWER_DOWN);
-        v[3] = MockIfaddrs::new().name("eth1").flags(FLAGS_UP);
-        assert!(!network_online(online_args, MockIfaddrsIterator::new(&v)));
-
-        v[2] = MockIfaddrs::new().name("eth1").flags(FLAGS_UP);
-        assert!(network_online(online_args, MockIfaddrsIterator::new(&v)));
+            .flags(FLAGS_UP)
+            .sockaddr(AddressFamily::Inet);
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
 
         v[1] = MockIfaddrs::new()
+            .name("eth1")
+            .flags(FLAGS_LOWER_LAYWER_DOWN)
+            .sockaddr(AddressFamily::Inet);
+        v[2] = MockIfaddrs::new()
+            .name("eth2")
+            .flags(FLAGS_UP)
+            .sockaddr(AddressFamily::Inet);
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        v[1] = MockIfaddrs::new()
+            .name("eth1")
+            .flags(FLAGS_UP)
+            .sockaddr(AddressFamily::Inet);
+        assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        v[0] = MockIfaddrs::new()
             .name("eth0")
-            .flags(FLAGS_LOWER_LAYWER_DOWN);
-        assert!(network_online(online_args, MockIfaddrsIterator::new(&v)));
+            .flags(FLAGS_LOWER_LAYWER_DOWN)
+            .sockaddr(AddressFamily::Inet);
+        assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
     }
 
     #[test]
     fn online_ignore_single() {
-        let interfaces = ["eth0".to_string()];
-        let online_args = NewtorkOnlineArguments {
-            interfaces: Some(NetworkOnlineArgumentsInterfaces {
-                interfaces: &interfaces,
-                action: NetworkOnlineArgumentsInterfacesAction::Ignore,
-            }),
-        };
+        let mut args = Args::default();
+        args.ignore = Some(vec!["eth0".into()]);
+        let n_args = NetworkArgument::from(&args);
 
-        let v = vec![
-            MockIfaddrs::new().name("lo").flags(FLAGS_LOOPBACK),
+        let mut v = vec![
+            MockIfaddrs::new()
+                .name("lo")
+                .flags(FLAGS_LOOPBACK)
+                .sockaddr(AddressFamily::Inet6),
             MockIfaddrs::new()
                 .name("eth0")
-                .flags(FLAGS_LOWER_LAYWER_DOWN),
-            MockIfaddrs::new().name("eth1").flags(FLAGS_UP),
-        ];
-
-        assert!(network_online(online_args, MockIfaddrsIterator::new(&v)));
-
-        let v = vec![
-            MockIfaddrs::new().name("lo").flags(FLAGS_LOOPBACK),
-            MockIfaddrs::new().name("eth0").flags(FLAGS_UP),
+                .flags(FLAGS_LOWER_LAYWER_DOWN)
+                .sockaddr(AddressFamily::Inet),
             MockIfaddrs::new()
                 .name("eth1")
-                .flags(FLAGS_LOWER_LAYWER_DOWN),
+                .flags(FLAGS_UP)
+                .sockaddr(AddressFamily::Inet6),
         ];
 
-        assert!(!network_online(online_args, MockIfaddrsIterator::new(&v)));
+        assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        v[1] = MockIfaddrs::new()
+            .name("eth0")
+            .flags(FLAGS_UP)
+            .sockaddr(AddressFamily::Inet);
+        v[2] = MockIfaddrs::new()
+            .name("eth1")
+            .flags(FLAGS_LOWER_LAYWER_DOWN)
+            .sockaddr(AddressFamily::Inet6);
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
     }
 
     #[test]
     fn online_ignore_multi() {
-        let interfaces = ["eth1".to_string(), "eth2".to_string()];
-        let online_args = NewtorkOnlineArguments {
-            interfaces: Some(NetworkOnlineArgumentsInterfaces {
-                interfaces: &interfaces,
-                action: NetworkOnlineArgumentsInterfacesAction::Ignore,
-            }),
-        };
+        let mut args = Args::default();
+        args.ignore = Some(vec!["eth1".into(), "eth2".to_string()]);
+        let n_args = NetworkArgument::from(&args);
 
         let mut v = vec![
-            MockIfaddrs::new().name("lo").flags(FLAGS_LOOPBACK),
             MockIfaddrs::new()
                 .name("eth0")
-                .flags(FLAGS_LOWER_LAYWER_DOWN),
+                .flags(FLAGS_LOWER_LAYWER_DOWN)
+                .sockaddr(AddressFamily::Inet6),
             MockIfaddrs::new()
                 .name("eth1")
-                .flags(FLAGS_LOWER_LAYWER_DOWN),
+                .flags(FLAGS_LOWER_LAYWER_DOWN)
+                .sockaddr(AddressFamily::Inet6),
             MockIfaddrs::new()
                 .name("eth2")
-                .flags(FLAGS_LOWER_LAYWER_DOWN),
+                .flags(FLAGS_LOWER_LAYWER_DOWN)
+                .sockaddr(AddressFamily::Inet6),
         ];
 
-        assert!(!network_online(online_args, MockIfaddrsIterator::new(&v)));
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
 
-        v[1] = MockIfaddrs::new().name("eth0").flags(FLAGS_UP);
-        assert!(network_online(online_args, MockIfaddrsIterator::new(&v)));
+        v[0] = MockIfaddrs::new()
+            .name("eth0")
+            .flags(FLAGS_UP)
+            .sockaddr(AddressFamily::Inet6);
+        assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
 
-        v[2] = MockIfaddrs::new().name("eth1").flags(FLAGS_UP);
-        assert!(network_online(online_args, MockIfaddrsIterator::new(&v)));
-
-        v[2] = MockIfaddrs::new()
+        v[1] = MockIfaddrs::new()
             .name("eth1")
-            .flags(FLAGS_LOWER_LAYWER_DOWN);
-        v[3] = MockIfaddrs::new().name("eth2").flags(FLAGS_UP);
-        assert!(network_online(online_args, MockIfaddrsIterator::new(&v)));
+            .flags(FLAGS_UP)
+            .sockaddr(AddressFamily::Inet6);
+        assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
 
-        v[2] = MockIfaddrs::new().name("eth1").flags(FLAGS_UP);
-        assert!(network_online(online_args, MockIfaddrsIterator::new(&v)));
+        v[1] = MockIfaddrs::new()
+            .name("eth1")
+            .flags(FLAGS_LOWER_LAYWER_DOWN)
+            .sockaddr(AddressFamily::Inet6);
+        v[2] = MockIfaddrs::new()
+            .name("eth2")
+            .flags(FLAGS_UP)
+            .sockaddr(AddressFamily::Inet6);
+        assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        v[1] = MockIfaddrs::new()
+            .name("eth1")
+            .flags(FLAGS_UP)
+            .sockaddr(AddressFamily::Inet6);
+        assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
+    }
+    #[test]
+    fn online_any() {
+        let mut args = Args::default();
+        args.any = true;
+        let n_args = NetworkArgument::from(&args);
+
+        let mut v = vec![MockIfaddrs::new()
+            .name("eth0")
+            .flags(FLAGS_LOWER_LAYWER_DOWN)
+            .sockaddr(AddressFamily::Inet6)];
+
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        v.push(
+            MockIfaddrs::new()
+                .name("eth1")
+                .flags(FLAGS_UP)
+                .sockaddr(AddressFamily::Inet6),
+        );
+        assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        args.ipv4 = true;
+        let n_args = NetworkArgument::from(&args);
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        v.push(
+            MockIfaddrs::new()
+                .name("eth2")
+                .flags(FLAGS_UP)
+                .sockaddr(AddressFamily::Inet),
+        );
+        assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        v.push(
+            MockIfaddrs::new()
+                .name("eth2")
+                .flags(FLAGS_UP)
+                .sockaddr(AddressFamily::Packet),
+        );
+        assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
     }
 
-    #[derive(Default, Clone, Debug)]
+    #[derive(Default, Debug)]
     struct MockSockaddr {
         sa_family: sa_family_t,
         sa_data: [c_char; 14],
     }
 
-    #[derive(Default, Clone, Debug)]
+    #[allow(unused)]
+    #[derive(Default, Debug)]
     struct MockIfaddrs {
         ifa_name: CString,
         ifa_flags: i32,
@@ -292,6 +706,7 @@ mod tests {
 
     struct MockIfaddrsIterator<'a> {
         iterator: slice::Iter<'a, MockIfaddrs>,
+        raw_scokaddrs: Vec<*mut sockaddr>,
     }
 
     impl<'a> Iterator for MockIfaddrsIterator<'a> {
@@ -299,57 +714,88 @@ mod tests {
 
         fn next(&mut self) -> Option<Self::Item> {
             self.iterator.next().map(|mock_ifaddrs| {
-                mock_ifaddrs
-                    .make_ifaddrs(ptr::null::<libc::ifaddrs>().cast_mut())
+                let ifaddrs = mock_ifaddrs
+                    .make_ifaddrs(ptr::null::<ifaddrs>().cast_mut());
+                self.raw_scokaddrs.push(ifaddrs.ifa_addr);
+                self.raw_scokaddrs.push(ifaddrs.ifa_netmask);
+                self.raw_scokaddrs.push(ifaddrs.ifa_ifu);
+                ifaddrs
             })
         }
     }
 
     impl<'a> MockIfaddrsIterator<'a> {
         fn new(v: &'a [MockIfaddrs]) -> Self {
-            Self { iterator: v.iter() }
+            Self {
+                iterator: v.iter(),
+                raw_scokaddrs: Vec::new(),
+            }
         }
     }
 
     impl MockSockaddr {
-        const fn into_sockaddr(self) -> sockaddr {
+        const fn as_sockaddr(&self) -> sockaddr {
             sockaddr {
                 sa_family: self.sa_family,
                 sa_data: self.sa_data,
             }
         }
     }
+    trait Trait1 {}
 
-    impl MockIfaddrs {
+    impl<'a> MockIfaddrs {
         fn new() -> Self {
-            MockIfaddrs::default()
+            Self::default()
         }
 
-        fn name<S: ToString>(mut self, name: S) -> Self {
+        fn name<S: ToString + ?Sized>(mut self, name: &S) -> Self {
             self.ifa_name = CString::new(name.to_string()).unwrap();
             self
         }
 
-        fn flags(mut self, flags: i32) -> Self {
+        const fn flags(mut self, flags: i32) -> Self {
             self.ifa_flags = flags;
             self
         }
 
-        fn make_ifaddrs(&self, next: *mut ifaddrs) -> libc::ifaddrs {
+        fn sockaddr(mut self, family: AddressFamily) -> Self {
+            self.ifa_addr = MockSockaddr {
+                sa_family: dbg!(
+                    libc::sa_family_t::try_from(family as i32).unwrap()
+                ),
+                sa_data: [libc::c_char::default(); 14],
+            };
+            self
+        }
+
+        fn make_ifaddrs(&'a self, next: *mut ifaddrs) -> ifaddrs {
             ifaddrs {
                 ifa_next: next,
                 ifa_name: self.ifa_name.as_c_str().as_ptr().cast_mut(),
                 #[allow(clippy::cast_sign_loss)]
                 ifa_flags: self.ifa_flags as u32,
-                ifa_addr: &mut self.ifa_addr.clone().into_sockaddr(),
-                ifa_netmask: &mut self.ifa_netmask.clone().into_sockaddr(),
-                ifa_ifu: &mut self.ifa_ifu.clone().into_sockaddr(),
-                ifa_data: self
-                    .ifa_data
-                    .clone()
-                    .map_or(ptr::null::<c_void>().cast_mut(), |v| {
-                        v.as_ptr().cast::<c_void>().cast_mut()
-                    }),
+                ifa_addr: Box::into_raw(Box::new(self.ifa_addr.as_sockaddr())),
+                ifa_netmask: ptr::null_mut::<sockaddr>(),
+                ifa_ifu: ptr::null_mut::<sockaddr>(),
+                ifa_data: ptr::null_mut::<libc::c_void>(),
+                //ifa_data: self
+                //    .ifa_data
+                //    .clone()
+                //    .map_or(ptr::null_mut::<libc::c_void>(), |v| {
+                //        v.as_ptr().cast::<libc::c_void>().cast_mut()
+                //    }),
+            }
+        }
+    }
+
+    impl<'a> Drop for MockIfaddrsIterator<'a> {
+        fn drop(&mut self) {
+            for sockaddr in &self.raw_scokaddrs {
+                if !sockaddr.is_null() {
+                    let sockaddr: Box<sockaddr> =
+                        unsafe { Box::from_raw(*sockaddr) };
+                    drop(sockaddr);
+                }
             }
         }
     }

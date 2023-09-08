@@ -44,14 +44,25 @@
           ];
 
           languages = {
-            rust = {
-              enable = true;
-              toolchain = {
-                rustc = pkgs.fenix.fromToolchainFile {
+            rust =
+              let
+                inherit (pkgs) fenix;
+
+                fileToolChain = fenix.fromToolchainFile {
                   dir = ./..;
                 };
+
+                nightlyFileToolChain = fileToolChain // {
+                  toolchain = fenix.fromToolchainOf { channel = "nightly"; };
+                };
+
+                toolchain = fenix.combine [ fileToolChain nightlyFileToolChain ];
+
+              in
+              {
+                enable = true;
+                inherit toolchain;
               };
-            };
             nix.enable = true;
           };
 

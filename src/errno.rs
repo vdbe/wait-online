@@ -1,5 +1,7 @@
 use std::io;
 
+use crate::libc;
+
 pub fn last() -> io::Error {
     io::Error::from_raw_os_error(errno())
 }
