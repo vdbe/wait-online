@@ -25,6 +25,8 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.toolchain }}
+      - name: Print rustc version
+        run:  rustc --version
       - name: cargo generate-lockfile
         if: hashFiles('Cargo.lock') == ''
         run: cargo generate-lockfile
@@ -43,6 +45,8 @@ jobs:
           submodules: true
       - name: Install stable
         uses: dtolnay/rust-toolchain@stable
+      - name: Print rustc version
+        run:  rustc --version
       - name: Install nightly for -Zminimal-versions
         uses: dtolnay/rust-toolchain@nightly
       - name: rustup default stable

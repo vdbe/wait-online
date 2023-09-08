@@ -35,7 +35,9 @@ jobs:
             sed -i '/^\s*\[profile.dev\]/a opt-level = 1' Cargo.toml
             cat Cargo.toml
         name: Enable debug symbols
-      - name: cargo test -Zsanitizer=address
+      - name: Print rustc version
+        run:  rustc --version
+      - name: cargo +nightly test -Zsanitizer=address
         # only --lib --tests b/c of https://github.com/rust-lang/rust/issues/53945
         run: cargo test --lib --tests --all-features --target x86_64-unknown-linux-gnu
         env:
@@ -43,7 +45,7 @@ jobs:
           RUSTFLAGS: "-Z sanitizer=address"
       - name: cargo test -Zsanitizer=leak
         if: always()
-        run: cargo test --all-features --target x86_64-unknown-linux-gnu
+        run: cargo +nightly test --all-features --target x86_64-unknown-linux-gnu
         env:
           LSAN_OPTIONS: "suppressions=lsan-suppressions.txt"
           RUSTFLAGS: "-Z sanitizer=leak"
@@ -60,7 +62,9 @@ jobs:
         with:
           toolchain: ${{ env.NIGHTLY }}
           components: miri
-      - name: cargo miri test
-        run: cargo miri test
+      - name: Print rustc version
+        run:  rustc --version
+      - name: cargo +nightly miri test
+        run: cargo +nightly miri test
         env:
           MIRIFLAGS: ""
