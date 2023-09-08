@@ -21,8 +21,12 @@ jobs:
       - uses: actions/checkout@v3
         with:
           submodules: true
-      - name: Ignore toolchain file
-        run: rm -f rust-toolchain.toml rust-toolchain
+      - name: Remove channel from rust-toolchain
+        run: |
+          touch rust-toolchain.toml
+          sed -i '/^channel/d' rust-toolchain.toml
+          rm -f rust-toolchain
+
       - name: Install ${{ matrix.toolchain }}
         uses: dtolnay/rust-toolchain@master
         with:
@@ -45,8 +49,11 @@ jobs:
       - uses: actions/checkout@v3
         with:
           submodules: true
-      - name: Ignore toolchain file
-        run: rm -f rust-toolchain.toml rust-toolchain
+      - name: Remove channel from rust-toolchain
+        run: |
+          touch rust-toolchain.toml
+          sed -i '/^channel/d' rust-toolchain.toml
+          rm -f rust-toolchain
       - name: Install stable
         uses: dtolnay/rust-toolchain@stable
       - name: rutsc --version

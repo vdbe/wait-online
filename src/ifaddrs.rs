@@ -1,21 +1,10 @@
 use std::{ffi, io, mem};
 
-use crate::{
-    errno,
-    libc::{self},
-};
+use crate::{errno, libc};
 
-pub use libc::ifaddrs;
-pub use nix::net::if_::InterfaceFlags;
-
-/// Checks if all interfaces are up
-///
-/// # Errors
-///
-/// Will return `Err` if [`getifaddrs`] errors.
-pub fn all_interfaces_up() -> Result<bool, io::Error> {
-    Ok(getifaddrs()?.all(is_interface_up))
-}
+// Re-export in case we need a wrapper later
+pub(crate) use libc::ifaddrs;
+pub(crate) use nix::net::if_::InterfaceFlags;
 
 /// Checks if an interface is up
 ///
@@ -62,18 +51,13 @@ pub fn getifaddrs() -> Result<InterfaceAddressIterator, io::Error> {
     }
 }
 
+/// Safe to use iterator over `libc::ifaddrs` from `libc::getifaddrs`
 pub struct InterfaceAddressIterator {
     /// Head linked list returned by `ifaddrs`
     ///
     /// needed for [`libc::freeifaddrs()`].
     base: *mut libc::ifaddrs,
     next: *mut libc::ifaddrs,
-}
-
-impl Drop for InterfaceAddressIterator {
-    fn drop(&mut self) {
-        unsafe { libc::freeifaddrs(self.base) };
-    }
 }
 
 impl Iterator for InterfaceAddressIterator {
@@ -89,12 +73,18 @@ impl Iterator for InterfaceAddressIterator {
     }
 }
 
+impl Drop for InterfaceAddressIterator {
+    fn drop(&mut self) {
+        unsafe { libc::freeifaddrs(self.base) };
+    }
+}
+
 /// Checks if waiting is needed for provided `ifa_name`
 ///
 /// # Safety
 ///
 /// `ifa_name` must be a valid ptr from [`ifaddrs`]
-pub unsafe fn check_require_or_ignore(
+pub(crate) unsafe fn check_require_or_ignore(
     ifa_name: *mut libc::c_char,
     require_or_irgnore_argument: InterfacesRequireOrIgnoreArgument,
 ) -> bool {
@@ -122,13 +112,13 @@ pub enum InterfacesActionArgument {
 
 #[derive(Debug, Clone, Copy)]
 pub struct InterfacesRequireOrIgnoreArgument<'a> {
-    pub interfaces: &'a [String],
-    pub action: InterfacesActionArgument,
+    pub(crate) interfaces: &'a [String],
+    pub(crate) action: InterfacesActionArgument,
 }
 
 impl<'a> InterfacesRequireOrIgnoreArgument<'a> {
     #[must_use]
-    pub const fn new(
+    pub(crate) const fn new(
         interfaces: &'a [String],
         action: InterfacesActionArgument,
     ) -> Self {
@@ -140,16 +130,8 @@ impl<'a> InterfacesRequireOrIgnoreArgument<'a> {
         interface: Option<&'a [String]>,
         ignore: Option<&'a [String]>,
     ) -> Option<Self> {
-        use InterfacesActionArgument::{Ignore, Require};
-        type Iroia<'a> = InterfacesRequireOrIgnoreArgument<'a>;
-        match (interface, ignore) {
-            (None, None) => None,
-            (Some(interfaces), None) => Some(Iroia::new(interfaces, Require)),
-            (None, Some(interfaces)) => Some(Iroia::new(interfaces, Ignore)),
-            _ => unreachable!(
-                "`interfaces` and `ignore` can never be set at the same time"
-            ),
-        }
+        Self::parse_args(interface, ignore)
+            .map(|(interfaces, action)| Self::new(interfaces, action))
     }
     #[must_use]
     pub fn parse_args(

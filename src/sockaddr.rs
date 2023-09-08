@@ -1,16 +1,16 @@
-pub use nix::sys::socket::AddressFamily;
-
+// Re-export in case we need a wrapper later
 pub use crate::libc::sockaddr;
+pub use nix::sys::socket::AddressFamily;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InterfacesFamilyTypeArgument {
-    pub ipv4: bool,
-    pub ipv6: bool,
+    pub(crate) ipv4: bool,
+    pub(crate) ipv6: bool,
 }
 
 impl InterfacesFamilyTypeArgument {
     #[must_use]
-    pub const fn from_args(ipv4: bool, ipv6: bool) -> Option<Self> {
+    pub(crate) const fn from_args(ipv4: bool, ipv6: bool) -> Option<Self> {
         match (ipv4, ipv6) {
             (false, false) => None,
             (ipv4, ipv6) => Some(Self { ipv4, ipv6 }),
@@ -23,7 +23,7 @@ impl InterfacesFamilyTypeArgument {
 /// A valid `libc::sockaddr` ptr must be provided,
 /// this ptr can be null
 #[inline]
-pub unsafe fn get_addres_family(
+pub(crate) unsafe fn get_addres_family(
     ifa_addr: *mut sockaddr,
 ) -> Option<AddressFamily> {
     (!ifa_addr.is_null())
@@ -37,7 +37,7 @@ pub unsafe fn get_addres_family(
 ///
 /// A valid `libc::sockaddr` ptr must be provided,
 /// this ptr can be null
-pub unsafe fn check_family_type(
+pub(crate) unsafe fn check_family_type(
     ifa_addr: *mut sockaddr,
     family_argument: crate::InterfacesFamilyTypeArgument,
 ) -> bool {

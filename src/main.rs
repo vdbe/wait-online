@@ -5,6 +5,9 @@ use std::{
     thread::sleep,
     time::{Duration, Instant},
 };
+
+use clap::Parser;
+
 use wait_online::{
     arguments::Args, ifaddrs::getifaddrs, network_online, NetworkArgument,
 };
@@ -12,7 +15,7 @@ use wait_online::{
 fn main() -> Result<ExitCode, io::Error> {
     let start = Instant::now();
 
-    let args = Args::get();
+    let args = Args::parse();
     let stop = start + Duration::from_secs(args.timeout);
 
     let network_argument = NetworkArgument::from(&args);

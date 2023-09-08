@@ -3,19 +3,18 @@ compile_error!("only linux is supported");
 
 use std::{collections::HashMap, ffi};
 
-// Re-exported external crates
-pub use nix::libc;
-
 use arguments::Args;
 use ifaddrs::{
-    check_require_or_ignore, is_interface_up, InterfacesActionArgument,
-    InterfacesRequireOrIgnoreArgument,
+    check_require_or_ignore, is_interface_up, InterfaceFlags,
+    InterfacesActionArgument, InterfacesRequireOrIgnoreArgument,
 };
-use nix::net::if_::InterfaceFlags;
 use sockaddr::{
     check_family_type, get_addres_family, AddressFamily,
     InterfacesFamilyTypeArgument,
 };
+
+// Re-exported external crates
+pub use nix::libc;
 
 mod errno;
 
@@ -25,7 +24,7 @@ pub mod operstate;
 pub mod sockaddr;
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct InterfacesArgument<'a> {
+struct InterfacesArgument<'a> {
     require_or_ignore: Option<InterfacesRequireOrIgnoreArgument<'a>>,
     family_type: Option<InterfacesFamilyTypeArgument>,
 }
@@ -36,108 +35,8 @@ pub struct NetworkArgument<'a> {
     exact: bool,
     any: bool,
 }
+
 type InterfaceMap<'a> = HashMap<&'a [u8], Option<(bool, bool)>>;
-
-fn is_interface_online_lazy(
-    ifaddr: ifaddrs::ifaddrs,
-    interfaces_argument: InterfacesArgument,
-) -> bool {
-    #[allow(clippy::cast_sign_loss)]
-    let mask = (InterfaceFlags::IFF_LOOPBACK.bits()
-        | InterfaceFlags::IFF_LOWER_UP.bits()) as u32;
-
-    ifaddr.ifa_flags & mask != 0
-        || interfaces_argument
-            .family_type
-            .map_or(false, |family_arg|
-                // SAFETY: We know `ifa_addr` is a valid or null ptr from `ifaddr`
-                unsafe {
-                    !check_family_type(ifaddr.ifa_addr, family_arg)
-                }
-            )
-        || interfaces_argument
-            .require_or_ignore
-            .map_or(false, |require_or_ignore_arg|
-                // SAFETY: We know `ifa_name` if a valid ptr from `ifaddr`
-                unsafe {
-                        !check_require_or_ignore(ifaddr.ifa_name, require_or_ignore_arg)
-                },
-            )
-}
-
-fn is_interface_online_exact(
-    ifaddr: libc::ifaddrs,
-    interface_argument: InterfacesArgument<'_>,
-    map: Option<&mut InterfaceMap>,
-) -> Option<bool> {
-    #[allow(clippy::cast_sign_loss)]
-    let mask = (InterfaceFlags::IFF_LOOPBACK.bits()
-        | InterfaceFlags::IFF_LOWER_UP.bits()) as u32;
-
-    let ifa_name = unsafe { ffi::CStr::from_ptr(ifaddr.ifa_name) };
-    let ifa_addr_family = unsafe { get_addres_family(ifaddr.ifa_addr) };
-
-    let interface_up = ifaddr.ifa_flags & mask != 0;
-    let correct_family: Option<AddressFamily> = interface_argument
-        .family_type
-        .map_or(ifa_addr_family, |family_arg| match ifa_addr_family {
-            Some(AddressFamily::Inet) if family_arg.ipv4 => {
-                Some(AddressFamily::Inet)
-            }
-            Some(AddressFamily::Inet6) if family_arg.ipv6 => {
-                Some(AddressFamily::Inet6)
-            }
-            _ => None,
-        });
-    let (correct_name, insert): (bool, bool) = interface_argument
-        .require_or_ignore
-        .map_or((true, true), |require_or_ignore_arg| {
-            let in_interface = require_or_ignore_arg
-                .interfaces
-                .iter()
-                .any(|interface| interface.as_bytes() == ifa_name.to_bytes());
-
-            let a = require_or_ignore_arg.action
-                == InterfacesActionArgument::Ignore;
-
-            (a ^ in_interface, a)
-        });
-
-    // Insert interface into the hash map if needed
-    if correct_name {
-        if let Some(map) = map {
-            let current = match ifa_addr_family {
-                Some(AddressFamily::Inet) => (true, false),
-                Some(AddressFamily::Inet6) => (false, true),
-                _ => (false, false),
-            };
-
-            #[allow(clippy::cast_sign_loss, clippy::option_if_let_else)]
-            if let Some(value) = map.get_mut(ifa_name.to_bytes()) {
-                if let Some(prev) = value {
-                    prev.0 |= current.0;
-                    prev.1 |= current.1;
-                } else {
-                    *value = Some(current);
-                }
-            } else if insert
-                && (ifaddr.ifa_flags
-                    & InterfaceFlags::IFF_LOOPBACK.bits() as u32)
-                    == 0
-            {
-                // Insert newly found interface into map
-                // except for when the required flag is used
-                // or it's a loopback interface
-                _ = map.insert(ifa_name.to_bytes(), Some(current));
-            }
-        }
-    };
-
-    match (correct_family.is_some(), correct_name) {
-        (true, true) => Some(interface_up),
-        _ => None,
-    }
-}
 
 /// Checks if network if online given the requirements provided by
 /// `network_online_arguments`
@@ -161,6 +60,23 @@ where
         (false, any, Some(interface_argument)) => {
             network_online_lazy(ifaddrs, any, interface_argument)
         }
+    }
+}
+
+fn network_online_lazy<I>(
+    mut ifaddrs: I,
+    any: bool,
+    interface_argument: InterfacesArgument<'_>,
+) -> bool
+where
+    I: Iterator<Item = ifaddrs::ifaddrs>,
+{
+    if any {
+        ifaddrs
+            .any(|ifaddr| is_interface_online_lazy(ifaddr, interface_argument))
+    } else {
+        ifaddrs
+            .all(|ifaddr| is_interface_online_lazy(ifaddr, interface_argument))
     }
 }
 
@@ -229,20 +145,106 @@ where
     all_up && all_present
 }
 
-fn network_online_lazy<I>(
-    mut ifaddrs: I,
-    any: bool,
+fn is_interface_online_lazy(
+    ifaddr: ifaddrs::ifaddrs,
+    interfaces_argument: InterfacesArgument,
+) -> bool {
+    #[allow(clippy::cast_sign_loss)]
+    let mask = (InterfaceFlags::IFF_LOOPBACK.bits()
+        | InterfaceFlags::IFF_LOWER_UP.bits()) as u32;
+
+    ifaddr.ifa_flags & mask != 0
+        || interfaces_argument
+            .family_type
+            .map_or(false, |family_arg|
+                // SAFETY: We know `ifa_addr` is a valid or null ptr from `ifaddr`
+                unsafe {
+                    !check_family_type(ifaddr.ifa_addr, family_arg)
+                }
+            )
+        || interfaces_argument
+            .require_or_ignore
+            .map_or(false, |require_or_ignore_arg|
+                // SAFETY: We know `ifa_name` if a valid ptr from `ifaddr`
+                unsafe {
+                        !check_require_or_ignore(ifaddr.ifa_name, require_or_ignore_arg)
+                },
+            )
+}
+
+fn is_interface_online_exact(
+    ifaddr: libc::ifaddrs,
     interface_argument: InterfacesArgument<'_>,
-) -> bool
-where
-    I: Iterator<Item = ifaddrs::ifaddrs>,
-{
-    if any {
-        ifaddrs
-            .any(|ifaddr| is_interface_online_lazy(ifaddr, interface_argument))
-    } else {
-        ifaddrs
-            .all(|ifaddr| is_interface_online_lazy(ifaddr, interface_argument))
+    map: Option<&mut InterfaceMap>,
+) -> Option<bool> {
+    #[allow(clippy::cast_sign_loss)]
+    let mask = (InterfaceFlags::IFF_LOOPBACK.bits()
+        | InterfaceFlags::IFF_LOWER_UP.bits()) as u32;
+
+    // SAFETY: We know `ifa_name` if a valid ptr from `ifaddr`
+    let ifa_name = unsafe { ffi::CStr::from_ptr(ifaddr.ifa_name) };
+    // SAFETY: We know `ifa_addr` is a valid or null ptr from `ifaddr`
+    let ifa_addr_family = unsafe { get_addres_family(ifaddr.ifa_addr) };
+
+    let interface_up = ifaddr.ifa_flags & mask != 0;
+    let correct_family: Option<AddressFamily> = interface_argument
+        .family_type
+        .map_or(ifa_addr_family, |family_arg| match ifa_addr_family {
+            Some(AddressFamily::Inet) if family_arg.ipv4 => {
+                Some(AddressFamily::Inet)
+            }
+            Some(AddressFamily::Inet6) if family_arg.ipv6 => {
+                Some(AddressFamily::Inet6)
+            }
+            _ => None,
+        });
+    let (correct_name, insert): (bool, bool) = interface_argument
+        .require_or_ignore
+        .map_or((true, true), |require_or_ignore_arg| {
+            let in_interface = require_or_ignore_arg
+                .interfaces
+                .iter()
+                .any(|interface| interface.as_bytes() == ifa_name.to_bytes());
+
+            let a = require_or_ignore_arg.action
+                == InterfacesActionArgument::Ignore;
+
+            (a ^ in_interface, a)
+        });
+
+    // Insert interface into the hash map if needed
+    if correct_name {
+        if let Some(map) = map {
+            let current = match ifa_addr_family {
+                Some(AddressFamily::Inet) => (true, false),
+                Some(AddressFamily::Inet6) => (false, true),
+                _ => (false, false),
+            };
+
+            #[allow(clippy::cast_sign_loss, clippy::option_if_let_else)]
+            if let Some(value) = map.get_mut(ifa_name.to_bytes()) {
+                if let Some(prev) = value {
+                    prev.0 |= current.0;
+                    prev.1 |= current.1;
+                } else {
+                    *value = Some(current);
+                }
+            } else if insert
+                && (ifaddr.ifa_flags
+                    & InterfaceFlags::IFF_LOOPBACK.bits() as u32)
+                    == 0
+            {
+                // Insert newly found interface into map
+                // except for when the required flag is used
+                // or it's a loopback interface
+                _ = map.insert(ifa_name.to_bytes(), Some(current));
+            }
+        }
+    };
+
+    match (correct_family.is_some(), correct_name) {
+        (true, true) => Some(interface_up),
+        _ => None,
     }
 }
 
@@ -354,7 +356,7 @@ mod tests {
     }
 
     #[test]
-    fn implicit_ignore_loopback() {
+    fn online_implicit_ignore_loopback() {
         let mut args = Args::default();
         args.ipv4 = true;
         let n_args = NetworkArgument::from(&args);
@@ -370,7 +372,7 @@ mod tests {
     }
 
     #[test]
-    fn require_loopback() {
+    fn online_require_loopback() {
         let mut args = Args::default();
         args.ipv4 = true;
         args.interface = Some(vec!["lo".into()]);
@@ -741,7 +743,6 @@ mod tests {
             }
         }
     }
-    trait Trait1 {}
 
     impl<'a> MockIfaddrs {
         fn new() -> Self {
@@ -760,9 +761,7 @@ mod tests {
 
         fn sockaddr(mut self, family: AddressFamily) -> Self {
             self.ifa_addr = MockSockaddr {
-                sa_family: dbg!(
-                    libc::sa_family_t::try_from(family as i32).unwrap()
-                ),
+                sa_family: libc::sa_family_t::try_from(family as i32).unwrap(),
                 sa_data: [libc::c_char::default(); 14],
             };
             self

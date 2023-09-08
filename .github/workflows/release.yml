@@ -1,7 +1,5 @@
 permissions:
-  contents: write
-  actions: read
-  checks: read
+  contents: read
 on:
   push:
     tags:
@@ -11,6 +9,10 @@ name: release
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      checks: read
+      actions: read
     steps:
       - uses: actions/github-script@v6
         id: checks-status

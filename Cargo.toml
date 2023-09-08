@@ -3,16 +3,37 @@ name = "wait-online"
 version = "0.1.1"
 edition = "2021"
 default-run = "wait-online"
+license = "MIT"
+build = "build.rs"
+exclude = [
+  "/.github/",
+  "/dev",
+  "/Makefile",
+  "/bacon.toml",
+]
+
+
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+
+[[bin]]
+name = "wait-online"
+path = "src/main.rs"
+required-features = ["clap"]
+
 
 [profile.release]
 strip = true
 
 [dependencies]
-clap = { version = "4.4.2", features = ["derive"] }
+clap = { version = "4.4.2", optional = true, features = ["derive"] }
 nix = { version = "0.27.0", features = ["net"] }
 
 # for minimal-versions
 [target.'cfg(any())'.dependencies]
 proc-macro2 = { version = "1.0.60", optional = true } # needed to allow clap to build with -Zminimal-versions on nightly (rustc 1.74.0-nightly (1e746d774 2023-09-07))
+
+[features]
+default = ["clap"]
+clap = ["dep:clap"]
