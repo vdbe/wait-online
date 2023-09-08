@@ -18,11 +18,13 @@ jobs:
       - uses: actions/checkout@v3
         with:
           submodules: true
+      - name: Ignore toolchain file
+        run: rm -f rust-toolchain.toml rust-toolchain
       - name: Install stable
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - name: Print rustc version
+      - name: rustc --version
         run:  rustc --version
       - name: cargo fmt --check
         run: cargo fmt --check
@@ -40,12 +42,14 @@ jobs:
       - uses: actions/checkout@v3
         with:
           submodules: true
+      - name: Ignore toolchain file
+        run: rm -f rust-toolchain.toml rust-toolchain
       - name: Install ${{ matrix.toolchain }}
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.toolchain }}
           components: clippy
-      - name: Print rustc version
+      - name: rustc --version
         run:  rustc --version
       - name: cargo clippy
         uses: actions-rs/clippy-check@v1
@@ -58,9 +62,11 @@ jobs:
       - uses: actions/checkout@v3
         with:
           submodules: true
+      - name: Ignore toolchain file
+        run: rm -f rust-toolchain.toml rust-toolchain
       - name: Install nightly
         uses: dtolnay/rust-toolchain@nightly
-      - name: Print rustc version
+      - name: rustc --version
         run:  rustc --version
       - name: cargo doc
         run: cargo doc --no-deps --all-features
@@ -78,11 +84,15 @@ jobs:
       - uses: actions/checkout@v3
         with:
           submodules: true
+      - name: Ignore toolchain file
+        run: rm -f rust-toolchain.toml rust-toolchain
       - name: Install ${{ matrix.msrv }}
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.msrv }}
-      - name: cargo +${{ matrix.msrv }} check
+      - name: rustc --version
+        run:  rustc --version
+      - name: cargo  check
         run: cargo check
       - name: cargo +${{ matrix.msrv }} check --release
         run: cargo check --release

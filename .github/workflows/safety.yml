@@ -17,6 +17,8 @@ jobs:
       - uses: actions/checkout@v3
         with:
           submodules: true
+      - name: Ignore toolchain file
+        run: rm -f rust-toolchain.toml rust-toolchain
       - name: Install nightly
         uses: dtolnay/rust-toolchain@nightly
       - run: |
@@ -35,9 +37,9 @@ jobs:
             sed -i '/^\s*\[profile.dev\]/a opt-level = 1' Cargo.toml
             cat Cargo.toml
         name: Enable debug symbols
-      - name: Print rustc version
+      - name: rustc --version
         run:  rustc --version
-      - name: cargo +nightly test -Zsanitizer=address
+      - name: cargo test -Zsanitizer=address
         # only --lib --tests b/c of https://github.com/rust-lang/rust/issues/53945
         run: cargo test --lib --tests --all-features --target x86_64-unknown-linux-gnu
         env:
@@ -45,7 +47,7 @@ jobs:
           RUSTFLAGS: "-Z sanitizer=address"
       - name: cargo test -Zsanitizer=leak
         if: always()
-        run: cargo +nightly test --all-features --target x86_64-unknown-linux-gnu
+        run: cargo test --all-features --target x86_64-unknown-linux-gnu
         env:
           LSAN_OPTIONS: "suppressions=lsan-suppressions.txt"
           RUSTFLAGS: "-Z sanitizer=leak"
@@ -55,16 +57,13 @@ jobs:
       - uses: actions/checkout@v3
         with:
           submodules: true
-      - run: |
-          echo "NIGHTLY=nightly-$(curl -s https://rust-lang.github.io/rustup-components-history/x86_64-unknown-linux-gnu/miri)" >> $GITHUB_ENV
-      - name: Install ${{ env.NIGHTLY }}
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ env.NIGHTLY }}
-          components: miri
-      - name: Print rustc version
+      - name: Ignore toolchain file
+        run: rm -f rust-toolchain.toml rust-toolchain
+      - name: Install miri
+        uses: dtolnay/rust-toolchain@miri
+      - name: rustc --version
         run:  rustc --version
-      - name: cargo +nightly miri test
-        run: cargo +nightly miri test
+      - name: cargo miri test
+        run: cargo miri test
         env:
           MIRIFLAGS: ""

@@ -19,8 +19,6 @@ jobs:
           submodules: true
       - name: Install stable
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
       - name: Make
         run: make
       - name: Make install
