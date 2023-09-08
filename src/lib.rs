@@ -64,24 +64,25 @@ where
 }
 
 fn network_online_lazy<I>(
-    mut ifaddrs: I,
+    ifaddrs: I,
     any: bool,
     interface_argument: InterfacesArgument<'_>,
 ) -> bool
 where
     I: Iterator<Item = ifaddrs::ifaddrs>,
 {
+    let mut online_iter = ifaddrs.filter_map(|ifaddr| {
+        is_interface_online_lazy(ifaddr, interface_argument)
+    });
     if any {
-        ifaddrs
-            .any(|ifaddr| is_interface_online_lazy(ifaddr, interface_argument))
+        online_iter.any(|x| x)
     } else {
-        ifaddrs
-            .all(|ifaddr| is_interface_online_lazy(ifaddr, interface_argument))
+        online_iter.all(|x| x)
     }
 }
 
 fn network_online_exact<I>(
-    mut ifaddrs: I,
+    ifaddrs: I,
     any: bool,
     interface_argument: InterfacesArgument<'_>,
 ) -> bool
@@ -89,10 +90,11 @@ where
     I: Iterator<Item = ifaddrs::ifaddrs>,
 {
     if any {
-        return ifaddrs.any(|ifaddr| {
-            is_interface_online_exact(ifaddr, interface_argument, None)
-                .unwrap_or(false)
-        });
+        return ifaddrs
+            .filter_map(|ifaddr| {
+                is_interface_online_exact(ifaddr, interface_argument, None)
+            })
+            .any(|x| x);
     }
 
     let mut map: InterfaceMap=
@@ -148,12 +150,13 @@ where
 fn is_interface_online_lazy(
     ifaddr: ifaddrs::ifaddrs,
     interfaces_argument: InterfacesArgument,
-) -> bool {
-    #[allow(clippy::cast_sign_loss)]
-    let mask = (InterfaceFlags::IFF_LOOPBACK.bits()
-        | InterfaceFlags::IFF_LOWER_UP.bits()) as u32;
+) -> Option<bool> {
+    const MASK: i32 = InterfaceFlags::IFF_LOWER_UP.bits();
 
-    ifaddr.ifa_flags & mask != 0
+    #[allow(clippy::cast_possible_wrap)]
+    let ifa_flags = ifaddr.ifa_flags as i32;
+
+    (ifa_flags & InterfaceFlags::IFF_LOOPBACK.bits() != 0).then(|| ifa_flags & MASK != 0
         || interfaces_argument
             .family_type
             .map_or(false, |family_arg|
@@ -169,24 +172,29 @@ fn is_interface_online_lazy(
                 unsafe {
                         !check_require_or_ignore(ifaddr.ifa_name, require_or_ignore_arg)
                 },
-            )
+            ))
 }
 
 fn is_interface_online_exact(
-    ifaddr: libc::ifaddrs,
+    ifaddr: ifaddrs::ifaddrs,
     interface_argument: InterfacesArgument<'_>,
     map: Option<&mut InterfaceMap>,
 ) -> Option<bool> {
-    #[allow(clippy::cast_sign_loss)]
-    let mask = (InterfaceFlags::IFF_LOOPBACK.bits()
-        | InterfaceFlags::IFF_LOWER_UP.bits()) as u32;
+    const MASK: i32 = InterfaceFlags::IFF_LOWER_UP.bits();
+
+    #[allow(clippy::cast_possible_wrap)]
+    let ifa_flags = ifaddr.ifa_flags as i32;
+
+    if ifa_flags & InterfaceFlags::IFF_LOOPBACK.bits() != 0 {
+        return None;
+    }
 
     // SAFETY: We know `ifa_name` if a valid ptr from `ifaddr`
     let ifa_name = unsafe { ffi::CStr::from_ptr(ifaddr.ifa_name) };
     // SAFETY: We know `ifa_addr` is a valid or null ptr from `ifaddr`
     let ifa_addr_family = unsafe { get_addres_family(ifaddr.ifa_addr) };
 
-    let interface_up = ifaddr.ifa_flags & mask != 0;
+    let interface_up = ifa_flags & MASK != 0;
     let correct_family: Option<AddressFamily> = interface_argument
         .family_type
         .map_or(ifa_addr_family, |family_arg| match ifa_addr_family {
@@ -229,14 +237,13 @@ fn is_interface_online_exact(
                 } else {
                     *value = Some(current);
                 }
-            } else if insert
-                && (ifaddr.ifa_flags
-                    & InterfaceFlags::IFF_LOOPBACK.bits() as u32)
-                    == 0
-            {
+            } else if insert {
                 // Insert newly found interface into map
                 // except for when the required flag is used
-                // or it's a loopback interface
+                // or it's a loopback interface (LOOPBACK shouldn't get here)
+                debug_assert!(
+                    ifa_flags & InterfaceFlags::IFF_LOOPBACK.bits() == 0
+                );
                 _ = map.insert(ifa_name.to_bytes(), Some(current));
             }
         }

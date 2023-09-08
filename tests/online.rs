@@ -54,6 +54,28 @@ mod online {
     }
 
     #[test]
+    fn only_loopback() {
+        let n_args = NetworkArgument::default();
+
+        let mut v = vec![MockIfaddrs::new().name("lo").flags(FLAGS_LOOPBACK)];
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        let args = Args::new().ipv4(true);
+        assert!(!network_online(
+            MockIfaddrsIterator::new(&v),
+            (&args).into()
+        ));
+
+        v.push(
+            MockIfaddrs::new()
+                .name("eth0")
+                .flags(FLAGS_UP)
+                .sockaddr(AddressFamily::Inet),
+        );
+        assert!(network_online(MockIfaddrsIterator::new(&v), (&args).into()));
+    }
+
+    #[test]
     fn implicit_ignore_loopback() {
         let mut args = Args::new();
         args.ipv4 = true;
