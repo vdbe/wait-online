@@ -368,6 +368,7 @@ mod online {
             .sockaddr(AddressFamily::Inet6);
         assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
     }
+
     #[test]
     fn any() {
         let mut args = Args::new();
@@ -407,6 +408,127 @@ mod online {
                 .flags(FLAGS_UP)
                 .sockaddr(AddressFamily::Packet),
         );
+        assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
+    }
+
+    #[test]
+    fn any_require() {
+        let args = Args::new()
+            .any(true)
+            .interface(vec!["eth1".into(), "eth2".into()]);
+        let n_args = NetworkArgument::from(&args);
+
+        let mut v = vec![MockIfaddrs::new()
+            .name("eth0")
+            .flags(FLAGS_UP)
+            .sockaddr(AddressFamily::Inet)];
+
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        v.push(
+            MockIfaddrs::new()
+                .name("eth1")
+                .flags(FLAGS_LOWER_LAYWER_DOWN)
+                .sockaddr(AddressFamily::Inet6),
+        );
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        v.push(
+            MockIfaddrs::new()
+                .name("eth2")
+                .flags(FLAGS_UP)
+                .sockaddr(AddressFamily::Inet6),
+        );
+        assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        let args = args.ipv4(true);
+        let n_args = NetworkArgument::from(&args);
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        v.push(
+            MockIfaddrs::new()
+                .name("eth2")
+                .flags(FLAGS_UP)
+                .sockaddr(AddressFamily::Inet),
+        );
+        assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
+    }
+
+    #[test]
+    fn any_ignore() {
+        let args = Args::new().any(true).ignore(vec!["eth1".into()]);
+        let n_args = NetworkArgument::from(&args);
+
+        let mut v = vec![MockIfaddrs::new()
+            .name("eth0")
+            .flags(FLAGS_LOWER_LAYWER_DOWN)
+            .sockaddr(AddressFamily::Inet)];
+
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        v.push(
+            MockIfaddrs::new()
+                .name("eth1")
+                .flags(FLAGS_UP)
+                .sockaddr(AddressFamily::Inet6),
+        );
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        v.push(
+            MockIfaddrs::new()
+                .name("eth2")
+                .flags(FLAGS_UP)
+                .sockaddr(AddressFamily::Inet),
+        );
+        assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
+    }
+
+    #[test]
+    fn any_ipv_4_6() {
+        let args = Args::new().any(true).ipv4(true);
+        let n_args = NetworkArgument::from(&args);
+
+        let mut v = vec![MockIfaddrs::new()
+            .name("eth0")
+            .flags(FLAGS_LOWER_LAYWER_DOWN)
+            .sockaddr(AddressFamily::Inet)];
+
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        v.push(
+            MockIfaddrs::new()
+                .name("eth1")
+                .flags(FLAGS_UP)
+                .sockaddr(AddressFamily::Inet6),
+        );
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        v.push(
+            MockIfaddrs::new()
+                .name("eth2")
+                .flags(FLAGS_UP)
+                .sockaddr(AddressFamily::Inet),
+        );
+        assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        let args = args.ignore(vec!["eth2".into()]);
+        let n_args = NetworkArgument::from(&args);
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        let args = args.interface(vec!["eth2".into()]).ipv6(true);
+        let n_args = NetworkArgument::from(&args);
+        assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        let args = args.interface(vec!["eth2".into()]).ipv4(false);
+        let n_args = NetworkArgument::from(&args);
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        let args = args.interface(vec!["eth1".into()]);
+        let n_args = NetworkArgument::from(&args);
+        assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
+
+        let args = args.interface(vec!["eth1".into()]);
+        let n_args = NetworkArgument::from(&args);
         assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
     }
 }

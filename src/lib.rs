@@ -223,7 +223,7 @@ fn is_interface_online_exact(
             }
             _ => None,
         });
-    let (correct_name, insert): (bool, bool) = interface_argument
+    let (correct_name, action_ignore): (bool, bool) = interface_argument
         .require_or_ignore
         .map_or((true, true), |require_or_ignore_arg| {
             let in_interface = require_or_ignore_arg
@@ -254,7 +254,7 @@ fn is_interface_online_exact(
                 } else {
                     *value = Some(current);
                 }
-            } else if insert {
+            } else if action_ignore {
                 // Insert newly found interface into map
                 // except for when the required flag is used
                 // or it's a loopback interface (LOOPBACK shouldn't get here)
@@ -281,10 +281,21 @@ impl<'a> InterfacesArgument<'a> {
         let family_type =
             InterfacesFamilyTypeArgument::from_args(args.ipv4, args.ipv6);
 
-        match (require_or_ignore, family_type) {
-            (None, None) => (false, None),
-            (require_or_ignore, Some(family_type)) => (
-                true,
+        match (require_or_ignore, family_type, args.any) {
+            (None, None, _) => (false, None),
+            (Some((interfaces, action)), None, false) => (
+                action == InterfacesActionArgument::Require,
+                Some(InterfacesArgument {
+                    require_or_ignore: Some(
+                        InterfacesRequireOrIgnoreArgument::new(
+                            interfaces, action,
+                        ),
+                    ),
+                    family_type,
+                }),
+            ),
+            (require_or_ignore, _, any) => (
+                any || family_type.is_some(),
                 Some(InterfacesArgument {
                     require_or_ignore: require_or_ignore.map(
                         |(interfaces, action)| {
@@ -292,17 +303,6 @@ impl<'a> InterfacesArgument<'a> {
                                 interfaces, action,
                             )
                         },
-                    ),
-                    family_type: Some(family_type),
-                }),
-            ),
-            (Some((interfaces, action)), None) => (
-                action == InterfacesActionArgument::Require,
-                Some(InterfacesArgument {
-                    require_or_ignore: Some(
-                        InterfacesRequireOrIgnoreArgument::new(
-                            interfaces, action,
-                        ),
                     ),
                     family_type,
                 }),
