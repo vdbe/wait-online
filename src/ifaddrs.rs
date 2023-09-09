@@ -6,13 +6,11 @@ use crate::{errno, libc};
 pub(crate) use libc::ifaddrs;
 pub(crate) use nix::net::if_::InterfaceFlags;
 
-/// Checks if an interface is up
+/// Checks if an interface is up.
+/// Loopback interfaces return None
 ///
-/// An interface is up when the flags [`InterfaceFlags::IFF_LOOPBACK`] _or_
-/// [`InterfaceFlags::IFF_LOWER_UP`] are set.
+/// An interface is up when the flags [`InterfaceFlags::IFF_LOWER_UP`] are set.
 ///
-/// `IFF_LOOPBACK` is seen as up because the `operstate` of an loopback
-/// interface is always unkown.
 ///
 /// `IFF_LOWER_UP` is used instead o `IFF_LOWER_UP` to match `ip addresses`
 /// _oper states_ (see table below).
@@ -22,12 +20,14 @@ pub(crate) use nix::net::if_::InterfaceFlags;
 /// | `IFF_UP`       | LOWERLAYERDOWN |
 /// | `IFF_LOWER_UP` | UP             |
 #[must_use]
-pub const fn is_interface_up(ifaddr: libc::ifaddrs) -> bool {
-    #[allow(clippy::cast_sign_loss)]
-    let mask = (InterfaceFlags::IFF_LOOPBACK.bits()
-        | InterfaceFlags::IFF_LOWER_UP.bits()) as u32;
+pub fn is_interface_up(ifaddr: libc::ifaddrs) -> Option<bool> {
+    const MASK: i32 = InterfaceFlags::IFF_LOWER_UP.bits();
 
-    (ifaddr.ifa_flags & mask) != 0
+    #[allow(clippy::cast_possible_wrap)]
+    let ifa_flags = ifaddr.ifa_flags as i32;
+
+    (ifa_flags & InterfaceFlags::IFF_LOOPBACK.bits() == 0)
+        .then_some(ifa_flags & MASK != 0)
 }
 
 /// Get interfaces addresses using libc's [`libc::getifaddrs`].

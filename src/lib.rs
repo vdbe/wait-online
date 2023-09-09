@@ -38,12 +38,32 @@ pub struct NetworkArgument<'a> {
 
 type InterfaceMap<'a> = HashMap<&'a [u8], Option<(bool, bool)>>;
 
+struct InterfacesChecker;
+
+impl InterfacesChecker {
+    /// Checks if `results` has _at least 1_ element and if _any_ element is true
+    #[inline]
+    fn any<I>(mut results: I) -> bool
+    where
+        I: Iterator<Item = bool>,
+    {
+        // `Iterator::any` already has this behavior
+        results.any(|x| x)
+    }
+
+    /// Checks if `results` has _at least 1_ element and if _all_ elements are
+    /// true
+    fn all<I>(mut results: I) -> bool
+    where
+        I: Iterator<Item = bool>,
+    {
+        results.next() == Some(true) && results.all(|x| x)
+    }
+}
+
 /// Checks if network if online given the requirements provided by
 /// `network_online_arguments`
-pub fn network_online<I>(
-    mut ifaddrs: I,
-    network_argument: NetworkArgument,
-) -> bool
+pub fn network_online<I>(ifaddrs: I, network_argument: NetworkArgument) -> bool
 where
     I: Iterator<Item = ifaddrs::ifaddrs>,
 {
@@ -52,8 +72,12 @@ where
         network_argument.any,
         network_argument.interfaces_argument,
     ) {
-        (_, false, None) => ifaddrs.all(is_interface_up),
-        (_, true, None) => ifaddrs.any(is_interface_up),
+        (_, false, None) => {
+            InterfacesChecker::all(ifaddrs.filter_map(is_interface_up))
+        }
+        (_, true, None) => {
+            InterfacesChecker::any(ifaddrs.filter_map(is_interface_up))
+        }
         (true, any, Some(interface_argument)) => {
             network_online_exact(ifaddrs, any, interface_argument)
         }
@@ -71,13 +95,14 @@ fn network_online_lazy<I>(
 where
     I: Iterator<Item = ifaddrs::ifaddrs>,
 {
-    let mut online_iter = ifaddrs.filter_map(|ifaddr| {
+    let online_iter = ifaddrs.filter_map(|ifaddr| {
         is_interface_online_lazy(ifaddr, interface_argument)
     });
+
     if any {
-        online_iter.any(|x| x)
+        InterfacesChecker::any(online_iter)
     } else {
-        online_iter.all(|x| x)
+        InterfacesChecker::all(online_iter)
     }
 }
 
@@ -90,11 +115,9 @@ where
     I: Iterator<Item = ifaddrs::ifaddrs>,
 {
     if any {
-        return ifaddrs
-            .filter_map(|ifaddr| {
-                is_interface_online_exact(ifaddr, interface_argument, None)
-            })
-            .any(|x| x);
+        return InterfacesChecker::any(ifaddrs.filter_map(|ifaddr| {
+            is_interface_online_exact(ifaddr, interface_argument, None)
+        }));
     }
 
     let mut map: InterfaceMap=
@@ -113,15 +136,9 @@ where
             HashMap::default()
         };
 
-    let all_up = ifaddrs
-        .filter_map(|ifaddr| {
-            is_interface_online_exact(
-                ifaddr,
-                interface_argument,
-                Some(&mut map),
-            )
-        })
-        .all(|x| x);
+    let all_up = InterfacesChecker::all(ifaddrs.filter_map(|ifaddr| {
+        is_interface_online_exact(ifaddr, interface_argument, Some(&mut map))
+    }));
 
     let all_present = map.values().all(|value| {
         if let Some((has_ipv4, has_ipv6)) = value {
@@ -156,7 +173,7 @@ fn is_interface_online_lazy(
     #[allow(clippy::cast_possible_wrap)]
     let ifa_flags = ifaddr.ifa_flags as i32;
 
-    (ifa_flags & InterfaceFlags::IFF_LOOPBACK.bits() != 0).then(|| ifa_flags & MASK != 0
+    (ifa_flags & InterfaceFlags::IFF_LOOPBACK.bits() == 0).then(|| ifa_flags & MASK != 0
         || interfaces_argument
             .family_type
             .map_or(false, |family_arg|
@@ -302,5 +319,31 @@ impl<'a> From<&'a Args> for NetworkArgument<'a> {
             exact,
             any: args.any,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn interfaces_checker_all() {
+        assert!(!InterfacesChecker::all(vec![].into_iter()));
+        assert!(!InterfacesChecker::all(vec![false].into_iter()));
+        assert!(InterfacesChecker::all(vec![true].into_iter()));
+        assert!(!InterfacesChecker::all(vec![false, false].into_iter()));
+        assert!(!InterfacesChecker::all(vec![false, true].into_iter()));
+        assert!(!InterfacesChecker::all(vec![true, false].into_iter()));
+        assert!(InterfacesChecker::all(vec![true, true].into_iter()));
+    }
+    #[test]
+    fn interfaces_checker_any() {
+        assert!(!InterfacesChecker::any(vec![].into_iter()));
+        assert!(!InterfacesChecker::any(vec![false].into_iter()));
+        assert!(InterfacesChecker::any(vec![true].into_iter()));
+        assert!(!InterfacesChecker::any(vec![false, false].into_iter()));
+        assert!(InterfacesChecker::any(vec![false, true].into_iter()));
+        assert!(InterfacesChecker::any(vec![true, false].into_iter()));
+        assert!(InterfacesChecker::any(vec![true, true].into_iter()));
     }
 }

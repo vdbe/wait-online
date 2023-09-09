@@ -106,12 +106,13 @@ mod online {
         let mut v = vec![mock_ifaddr.sockaddr(AddressFamily::Packet)];
         assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
 
-        let mock_ifaddr = MockIfaddrs::new()
-            .name("lo")
-            .flags(FLAGS_LOOPBACK)
-            .sockaddr(AddressFamily::Packet);
-        v.push(mock_ifaddr.sockaddr(AddressFamily::Inet));
-        assert!(network_online(MockIfaddrsIterator::new(&v), n_args));
+        v.push(
+            MockIfaddrs::new()
+                .name("lo")
+                .flags(FLAGS_LOOPBACK)
+                .sockaddr(AddressFamily::Inet),
+        );
+        assert!(!network_online(MockIfaddrsIterator::new(&v), n_args));
     }
 
     #[test]
