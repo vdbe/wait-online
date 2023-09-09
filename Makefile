@@ -5,7 +5,7 @@ libdir = $(prefix)/lib
 TARGET = debug
 DEBUG ?= 0
 
-ARGS ?= --no-default-features
+ARGS ?= 
 
 ifeq ($(DEBUG),0)
 	TARGET = release
