@@ -92,6 +92,12 @@ in
   config = mkIf cfg.enable {
     assertions = [
       {
+        assertion = !config.systemd.network.wait-online.enable || !config.networking.networkmanager;
+        message = ''
+          `standalone-network-wait-online` is not meant for use in combination with `systemd.nentwork.wait-online` or `networking.networkmanager`
+        '';
+      }
+      {
         assertion = !(cfg.requiredInterfaces != [ ] && cfg.ignoredInterfaces != [ ]);
         message = ''
           standalone-network-wait-online.ignoredInterfaces and standalone-network-wait-online.ignoredInterfaces
@@ -101,7 +107,7 @@ in
       {
         assertion = !opt.interval.isDefined || (10 <= cfg.interval && cfg.interval >= 10000);
         message = ''
-          standalone-network-wait-online.interval must be between 10 and 10000 milliseconds.
+          standalone-network-wait-online.interval must be between 10 and 10000 milliseconds
         '';
       }
     ];

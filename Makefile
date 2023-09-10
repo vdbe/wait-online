@@ -13,7 +13,7 @@ ifeq ($(DEBUG),0)
 endif
 
 BINARY = target/${TARGET}/wait-online
-SERVICE =  standalone-network-wait-online.service
+SERVICE = network-standalone-wait-online.service
 
 SOURCES = $(shell find src -type f -name '*.rs') build.rs Cargo.toml Cargo.lock
 

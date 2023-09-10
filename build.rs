@@ -1,7 +1,7 @@
 use std::{env, fs::File, io::Write, path::Path};
 
 fn service(exec: &str) -> String {
-    let description = "Standalone Wait Online";
+    let description = "Wait for Network to be Configured";
 
     let network_target = "network.target";
     let network_online_target = "network-online.target";
@@ -32,7 +32,7 @@ fn main() {
     let prefix = prefix.as_deref().unwrap_or("/usr/local");
 
     let service_path =
-        Path::new("target/standalone-network-wait-online.service");
+        Path::new("target/network-standalone-wait-online.service");
     let exec = format!("{prefix}/bin/wait-online");
 
     let service = service(&exec);
