@@ -1,4 +1,4 @@
-{ config, lib, pkgs, ... }:
+{ config, options, lib, pkgs, utils, ... }:
 let
   inherit (builtins) toString map;
   inherit (lib) types;
@@ -6,10 +6,11 @@ let
   inherit (lib.modules) mkIf;
   inherit (lib.lists) optional;
 
+  opt = options.standalone-network-wait-online;
   cfg = config.standalone-network-wait-online;
 in
 {
-  options.standalone-wait-online = {
+  options.standalone-network-wait-online = {
     enable = mkEnableOption "Enable the Standalone wait-online service";
     pkg = mkOption {
       type = types.package;
@@ -70,7 +71,14 @@ in
       default = 120;
       example = 0;
     };
-    interval = { };
+    interval = mkOption {
+      description = lib.mdDoc ''
+        Time between checks to see if the network is online (in ms).
+        Must be between 10 and 10000.
+      '';
+      type = types.ints.unsigned;
+      example = 50;
+    };
 
     extraArgs = mkOption {
       description = lib.mdDoc ''
@@ -82,16 +90,25 @@ in
   };
 
   config = mkIf cfg.enable {
-    assertions = [{
-      assertion = !(cfg.requiredInterfaces != [ ] && cfg.ignoredInterfaces != [ ]);
-      message = ''
-        standalone-network-wait-online.ignoredInterfaces and standalone-network-wait-online.ignoredInterfaces
-        can't be used at the same time
-      '';
-    }];
+    assertions = [
+      {
+        assertion = !(cfg.requiredInterfaces != [ ] && cfg.ignoredInterfaces != [ ]);
+        message = ''
+          standalone-network-wait-online.ignoredInterfaces and standalone-network-wait-online.ignoredInterfaces
+          can't be used at the same time
+        '';
+      }
+      {
+        assertion = !opt.interval.isDefined || (10 <= cfg.interval && cfg.interval >= 10000);
+        message = ''
+          standalone-network-wait-online.interval must be between 10 and 10000 milliseconds.
+        '';
+      }
+    ];
 
     standalone-network-wait-online.extraArgs = [ "--timeout=${toString cfg.timeout}" ]
-      ++ optional cfg.any "--any"
+      ++ optional opt.interval.isDefined "--interval=${toString cfg.interval}"
+      ++ optional cfg.anyInterface "--any"
       ++ optional cfg.requireIpv6 "--ipv6"
       ++ optional cfg.requireIpv4 "--ipv4"
       ++ map (i: "--ignore=${i}") cfg.ignoredInterfaces
@@ -101,7 +118,7 @@ in
       enable = true;
 
       # [Unit]
-      description = "Wait for Network to be configured";
+      description = "Wait for Network to be Configured";
       conflicts = [ "shutdown.target" ];
       bindsTo = [ "network.target" ];
       after = [ "network.target" ];
@@ -113,14 +130,12 @@ in
       # [Service]
       serviceConfig = {
         Type = "oneshot";
-        ExecStart = "${cfg.pkgs}/bin/wait-online";
+        ExecStart = "${cfg.pkg}/bin/wait-online ${utils.escapeSystemdExecArgs cfg.extraArgs}";
         RemainAfterExit = "yes";
       };
 
       # [Install]
       wantedBy = [ "network-online.target" ];
     };
-
-
   };
 }

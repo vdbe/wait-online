@@ -20,10 +20,10 @@
     {
       nixosModules = rec {
         default = standalone-wait-online;
-        standalone-wait-online = { config, ... }: {
+        standalone-wait-online = { pkgs, ... }: {
           imports = [ ./nix/modules/standalone-wait-online.nix ];
 
-          standalone-wait-online.pkg = self.packages.${config.system}.default;
+          standalone-network-wait-online.pkg = self.packages.${pkgs.system}.default;
         };
       };
       packages = forAllSystems
