@@ -92,9 +92,9 @@ in
   config = mkIf cfg.enable {
     assertions = [
       {
-        assertion = !config.systemd.network.wait-online.enable || !config.networking.networkmanager;
+        assertion = !config.systemd.network.wait-online.enable || !config.networking.networkmanager.enable;
         message = ''
-          `standalone-network-wait-online` is not meant for use in combination with `systemd.nentwork.wait-online` or `networking.networkmanager`
+          `standalone-network-wait-online` is not meant for use in combination with `systemd.network.wait-online` or `networking.networkmanager`
         '';
       }
       {

@@ -1,17 +1,21 @@
 [package]
 name = "wait-online"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 default-run = "wait-online"
+repository = "https://github.com/vdbe/wait-online"
 license = "MIT"
 build = "build.rs"
 exclude = [
   "/.github/",
-  "/dev",
+  "/dev/",
+  "/nix/",
   "/Makefile",
   "/bacon.toml",
+  "/flake.nix",
+  "/flake.lock",
 ]
-
+rust-version = "1.70"
 
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
