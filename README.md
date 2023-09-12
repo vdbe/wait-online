@@ -48,7 +48,7 @@ All options can be found under `standalone-network-wait-online`.
 - requireIpv4
 - requireIpv6
 - anyInterface
-- timout
+- timeout
 - interval
 
 See the [module file](nix/modules/standalone-wait-online.nix) for more info
