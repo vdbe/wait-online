@@ -319,8 +319,8 @@ mod online {
 
     #[test]
     fn ignore_multi() {
-        let mut args = Args::new();
-        args.ignore = Some(vec!["eth1".into(), "eth2".to_string()]);
+        let args = Args::new()
+            .ignore(["eth1", "eth2"].into_iter().map(Into::into).collect());
         let n_args = NetworkArgument::from(&args);
 
         let mut v = vec![

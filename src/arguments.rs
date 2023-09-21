@@ -6,13 +6,13 @@ use clap::{value_parser, Parser};
 pub struct Args {
     /// Block until at least these interfaces have appeared
     #[cfg_attr(feature = "clap", arg(short, long, conflicts_with = "ignore"))]
-    pub interface: Option<Vec<String>>,
+    pub interface: Option<Vec<Box<str>>>,
 
     /// Don't take these interfaces into account
     ///
     /// By default only loopback interfaces are ignored.
     #[cfg_attr(feature = "clap", arg(long, conflicts_with = "interface"))]
-    pub ignore: Option<Vec<String>>,
+    pub ignore: Option<Vec<Box<str>>>,
 
     /// Requires at least one IPv4 address
     #[cfg_attr(
@@ -76,14 +76,14 @@ impl Args {
     }
 
     #[must_use]
-    pub fn interface(mut self, interface: Vec<String>) -> Self {
+    pub fn interface(mut self, interface: Vec<Box<str>>) -> Self {
         self.ignore = None;
         self.interface = Some(interface);
         self
     }
 
     #[must_use]
-    pub fn ignore(mut self, ignore: Vec<String>) -> Self {
+    pub fn ignore(mut self, ignore: Vec<Box<str>>) -> Self {
         self.interface = None;
         self.ignore = Some(ignore);
         self

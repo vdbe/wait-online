@@ -112,14 +112,14 @@ pub enum InterfacesActionArgument {
 
 #[derive(Debug, Clone, Copy)]
 pub struct InterfacesRequireOrIgnoreArgument<'a> {
-    pub(crate) interfaces: &'a [String],
+    pub(crate) interfaces: &'a [Box<str>],
     pub(crate) action: InterfacesActionArgument,
 }
 
 impl<'a> InterfacesRequireOrIgnoreArgument<'a> {
     #[must_use]
     pub(crate) const fn new(
-        interfaces: &'a [String],
+        interfaces: &'a [Box<str>],
         action: InterfacesActionArgument,
     ) -> Self {
         Self { interfaces, action }
@@ -127,17 +127,17 @@ impl<'a> InterfacesRequireOrIgnoreArgument<'a> {
 
     #[must_use]
     pub fn from_args(
-        interface: Option<&'a [String]>,
-        ignore: Option<&'a [String]>,
+        interface: Option<&'a [Box<str>]>,
+        ignore: Option<&'a [Box<str>]>,
     ) -> Option<Self> {
         Self::parse_args(interface, ignore)
             .map(|(interfaces, action)| Self::new(interfaces, action))
     }
     #[must_use]
     pub fn parse_args(
-        interface: Option<&'a [String]>,
-        ignore: Option<&'a [String]>,
-    ) -> Option<(&'a [String], InterfacesActionArgument)> {
+        interface: Option<&'a [Box<str>]>,
+        ignore: Option<&'a [Box<str>]>,
+    ) -> Option<(&'a [Box<str>], InterfacesActionArgument)> {
         use InterfacesActionArgument::{Ignore, Require};
         match (interface, ignore) {
             (None, None) => None,
@@ -154,7 +154,7 @@ impl<'a> InterfacesRequireOrIgnoreArgument<'a> {
 mod tests {
     use super::*;
 
-    use std::ffi::CString;
+    use std::{ffi::CString, iter};
 
     use crate::libc;
 
@@ -162,12 +162,14 @@ mod tests {
     fn check_require_or_ignore_ignore() {
         let action = InterfacesActionArgument::Ignore;
 
-        let interfaces = vec!["eth0".to_string()];
+        let interfaces: Box<[Box<str>]> =
+            iter::once("eth0").map(Into::into).collect();
         let arg = InterfacesRequireOrIgnoreArgument::new(&interfaces, action);
         let combinations = [("eth0", arg, false), ("eth1", arg, true)];
         check_combinations(&combinations);
 
-        let interfaces = vec!["eth0".to_string(), "eth1".to_string()];
+        let interfaces: Box<[Box<str>]> =
+            ["eth0", "eth1"].into_iter().map(Into::into).collect();
         let action = InterfacesActionArgument::Ignore;
         let arg = InterfacesRequireOrIgnoreArgument::new(&interfaces, action);
         let combinations = [
@@ -183,12 +185,14 @@ mod tests {
     fn check_require_or_ignore_require() {
         let action = InterfacesActionArgument::Require;
 
-        let interfaces = vec!["eth0".to_string()];
+        let interfaces: Box<[Box<str>]> =
+            iter::once("eth0").map(Into::into).collect();
         let arg = InterfacesRequireOrIgnoreArgument::new(&interfaces, action);
         let combinations = [("eth0", arg, true), ("eth1", arg, false)];
         check_combinations(&combinations);
 
-        let interfaces = vec!["eth0".to_string(), "eth1".to_string()];
+        let interfaces: Box<[Box<str>]> =
+            ["eth0", "eth1"].into_iter().map(Into::into).collect();
         let arg = InterfacesRequireOrIgnoreArgument::new(&interfaces, action);
         let combinations = [
             ("eth0", arg, true),
