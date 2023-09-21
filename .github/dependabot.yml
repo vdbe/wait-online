@@ -9,3 +9,5 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    ignore:
+      - dependency-name: "proc-macro2" # Is a minimal version
