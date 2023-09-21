@@ -69,7 +69,7 @@ jobs:
       - name: Install stable
         uses: dtolnay/rust-toolchain@stable
       - name: rustc --version
-        run:  rustc --version
+        run: rustc --version
       - name: make
         env:
           RUSTFLAGS: -C target-feature=+crt-static

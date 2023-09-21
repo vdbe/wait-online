@@ -8,6 +8,9 @@
     # Devenv
     devenv.url = "github:cachix/devenv";
     devenv.inputs.nixpkgs.follows = "nixpkgs";
+    nix2container.url = "github:nlewo/nix2container";
+    nix2container.inputs.nixpkgs.follows = "devenv/nixpkgs";
+    mk-shell-bin.url = "github:rrbutani/nix-mk-shell-bin";
     fenix.url = "github:nix-community/fenix";
     fenix.inputs.nixpkgs.follows = "devenv/nixpkgs";
   };
@@ -20,12 +23,16 @@
       ];
       systems = import systems;
 
-      perSystem = { system, pkgs, ... }: {
+      perSystem = { config, system, pkgs, ... }: {
         _module.args.pkgs = import inputs.nixpkgs {
           inherit system;
           overlays = [
             fenix.overlays.default
           ];
+        };
+
+        checks = {
+          pre-commit = config.devenv.shells.default.pre-commit.run;
         };
 
         devenv.shells.default = {
@@ -79,6 +86,9 @@
 
             # Yaml
             yamllint.enable = true;
+
+            # Makefile
+            checkmake.enable = true;
           };
         };
       };

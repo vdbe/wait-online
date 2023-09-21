@@ -21,6 +21,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Make
         run: make
+      - name: Make test
+        run: test
       - name: Make install
         run: sudo make install
       - name: Check if installed
@@ -29,3 +31,5 @@ jobs:
         run: sudo make uninstall
       - name: Check if uninstalled
         run: command -v wait-online && exit 1 || exit 0
+      - name: Make clean
+        run: make clean

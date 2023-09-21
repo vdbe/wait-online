@@ -18,6 +18,7 @@ rustPlatform.buildRustPackage rec {
     "nix/"
     ".github/"
     ".gitignore"
+    ".yamllint.yml"
     "bacon.toml"
     "rust-toolchain.toml"
     "flake.nix"

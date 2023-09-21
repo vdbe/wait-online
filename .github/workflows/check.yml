@@ -25,7 +25,7 @@ jobs:
         with:
           components: rustfmt
       - name: rustc --version
-        run:  rustc --version
+        run: rustc --version
       - name: cargo fmt --check
         run: cargo fmt --check
   clippy:
@@ -50,7 +50,7 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
           components: clippy
       - name: rustc --version
-        run:  rustc --version
+        run: rustc --version
       - name: cargo clippy
         uses: actions-rs/clippy-check@v1
         with:
@@ -67,7 +67,7 @@ jobs:
       - name: Install nightly
         uses: dtolnay/rust-toolchain@nightly
       - name: rustc --version
-        run:  rustc --version
+        run: rustc --version
       - name: cargo doc
         run: cargo doc --no-deps --all-features
         env:
@@ -84,7 +84,7 @@ jobs:
       - name: Install stable
         uses: dtolnay/rust-toolchain@stable
       - name: rustc --version
-        run:  rustc --version
+        run: rustc --version
       - name: cargo install cargo-hack
         uses: taiki-e/install-action@cargo-hack
       # intentionally no target specifier; see https://github.com/jonhoo/rust-ci-conf/pull/4
@@ -109,7 +109,7 @@ jobs:
         with:
           toolchain: ${{ matrix.msrv }}
       - name: rustc --version
-        run:  rustc --version
+        run: rustc --version
       - name: cargo  check
         run: cargo check
       - name: cargo +${{ matrix.msrv }} check --release

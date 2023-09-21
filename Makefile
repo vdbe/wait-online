@@ -17,8 +17,15 @@ SERVICE = network-standalone-wait-online.service
 
 SOURCES = $(shell find src -type f -name '*.rs') build.rs Cargo.toml Cargo.lock
 
+.PHONY: all
 all: $(BINARY)
 
+.PHONY: test
+test: $(SOURCES)
+	env prefix=${prefix} \
+		cargo build $(ARGS)
+
+.PHONY: clean
 clean:
 	cargo clean
 
@@ -33,6 +40,7 @@ bin $(BINARY): $(SOURCES)
 
 ## Install commands
 
+.PHONY: install
 install: install-bin install-service
 
 install-bin: ${BINARY}
@@ -43,6 +51,7 @@ install-service: ${BINARY}
 
 ## Uninstall Commands
 
+.PHONY: uninstall
 uninstall: uninstall-service uninstall-bin
 
 uninstall-bin:
