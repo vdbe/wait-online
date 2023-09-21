@@ -37,9 +37,9 @@ pub(crate) unsafe fn get_addres_family(
 ///
 /// A valid `libc::sockaddr` ptr must be provided,
 /// this ptr can be null
-pub(crate) unsafe fn check_family_type(
+pub unsafe fn check_family_type(
     ifa_addr: *mut sockaddr,
-    family_argument: crate::InterfacesFamilyTypeArgument,
+    family_argument: InterfacesFamilyTypeArgument,
 ) -> bool {
     // Check if this type of address if required
     let family = unsafe { get_addres_family(ifa_addr) };
@@ -120,6 +120,29 @@ mod tests {
                 AddressFamily::Inet6,
                 InterfacesFamilyTypeArgument::from_args(true, false),
                 false,
+            ),
+        ];
+
+        check_combinations(&combinations);
+    }
+
+    #[test]
+    fn check_family_type_other() {
+        let combinations = vec![
+            (
+                AddressFamily::Unix,
+                InterfacesFamilyTypeArgument::from_args(true, true),
+                true,
+            ),
+            (
+                AddressFamily::Unix,
+                InterfacesFamilyTypeArgument::from_args(false, true),
+                true,
+            ),
+            (
+                AddressFamily::Unix,
+                InterfacesFamilyTypeArgument::from_args(true, false),
+                true,
             ),
         ];
 

@@ -9,8 +9,7 @@ use ifaddrs::{
     InterfacesActionArgument, InterfacesRequireOrIgnoreArgument,
 };
 use sockaddr::{
-    check_family_type, get_addres_family, AddressFamily,
-    InterfacesFamilyTypeArgument,
+    get_addres_family, AddressFamily, InterfacesFamilyTypeArgument,
 };
 
 // Re-exported external crates
@@ -82,14 +81,15 @@ where
             network_online_exact(ifaddrs, any, interface_argument)
         }
         (false, any, Some(interface_argument)) => {
-            network_online_lazy(ifaddrs, any, interface_argument)
+            // If `exact` is false `any` is also _always_ false
+            debug_assert!(!any);
+            network_online_lazy(ifaddrs, interface_argument)
         }
     }
 }
 
 fn network_online_lazy<I>(
     ifaddrs: I,
-    any: bool,
     interface_argument: InterfacesArgument<'_>,
 ) -> bool
 where
@@ -99,11 +99,7 @@ where
         is_interface_online_lazy(ifaddr, interface_argument)
     });
 
-    if any {
-        InterfacesChecker::any(online_iter)
-    } else {
-        InterfacesChecker::all(online_iter)
-    }
+    InterfacesChecker::all(online_iter)
 }
 
 fn network_online_exact<I>(
@@ -173,15 +169,18 @@ fn is_interface_online_lazy(
     #[allow(clippy::cast_possible_wrap)]
     let ifa_flags = ifaddr.ifa_flags as i32;
 
+    debug_assert!(interfaces_argument.family_type.is_none());
+
     (ifa_flags & InterfaceFlags::IFF_LOOPBACK.bits() == 0).then(|| ifa_flags & MASK != 0
-        || interfaces_argument
-            .family_type
-            .map_or(false, |family_arg|
-                // SAFETY: We know `ifa_addr` is a valid or null ptr from `ifaddr`
-                unsafe {
-                    !check_family_type(ifaddr.ifa_addr, family_arg)
-                }
-            )
+        // `interfaces_argument.family_type` is _always_ None in `fn is_interface_online_lazy`
+        // || interfaces_argument
+        //     .family_type
+        //     .map_or(false, |family_arg|
+        //         // SAFETY: We know `ifa_addr` is a valid or null ptr from `ifaddr`
+        //         unsafe {
+        //             !check_family_type(ifaddr.ifa_addr, family_arg)
+        //         }
+        //     )
         || interfaces_argument
             .require_or_ignore
             .map_or(false, |require_or_ignore_arg|
@@ -294,19 +293,28 @@ impl<'a> InterfacesArgument<'a> {
                     family_type,
                 }),
             ),
-            (require_or_ignore, _, any) => (
-                any || family_type.is_some(),
-                Some(InterfacesArgument {
-                    require_or_ignore: require_or_ignore.map(
-                        |(interfaces, action)| {
-                            InterfacesRequireOrIgnoreArgument::new(
-                                interfaces, action,
-                            )
-                        },
-                    ),
-                    family_type,
-                }),
-            ),
+            (require_or_ignore, family_type, any) => {
+                // Some None true -> true || None.is_some() = true
+                // None Some true -> true || Some.is_some() = true
+                // None Some false -> false || Some.is_some = true
+                // _    _    _ -> true && true && true = true (see lines above)
+                // Just to be sure
+                debug_assert!(any || family_type.is_some());
+                (
+                    //any || family_type.is_some(),
+                    true,
+                    Some(InterfacesArgument {
+                        require_or_ignore: require_or_ignore.map(
+                            |(interfaces, action)| {
+                                InterfacesRequireOrIgnoreArgument::new(
+                                    interfaces, action,
+                                )
+                            },
+                        ),
+                        family_type,
+                    }),
+                )
+            }
         }
     }
 }
