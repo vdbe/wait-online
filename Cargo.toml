@@ -36,7 +36,7 @@ nix = { version = "0.27.0", features = ["net"] }
 
 # for minimal-versions
 [target.'cfg(any())'.dependencies]
-proc-macro2 = { version = "1.0.60", optional = true } # needed to allow clap to build with -Zminimal-versions on nightly (rustc 1.74.0-nightly (1e746d774 2023-09-07))
+proc-macro2 = { version = "1.0.67", optional = true } # needed to allow clap to build with -Zminimal-versions on nightly (rustc 1.74.0-nightly (1e746d774 2023-09-07))
 
 [features]
 default = ["clap"]
