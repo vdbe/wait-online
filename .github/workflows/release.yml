@@ -65,7 +65,7 @@ jobs:
           echo "Some checks are still running or did not pass"
           exit 1
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Install stable
         uses: dtolnay/rust-toolchain@stable
       - name: rustc --version
