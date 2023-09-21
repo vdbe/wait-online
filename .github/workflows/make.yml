@@ -22,7 +22,7 @@ jobs:
       - name: Make
         run: make
       - name: Make test
-        run: test
+        run: make test
       - name: Make install
         run: sudo make install
       - name: Check if installed
