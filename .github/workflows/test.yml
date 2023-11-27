@@ -60,6 +60,7 @@ jobs:
         run: cargo test --locked --all-features --all-targets
   coverage:
     runs-on: ubuntu-latest
+    environment: workflow_test_coverage
     name: ubuntu / stable / coverage
     steps:
       - uses: actions/checkout@v4
@@ -79,4 +80,5 @@ jobs:
       - name: Upload to codecov.io
         uses: codecov/codecov-action@v3
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
